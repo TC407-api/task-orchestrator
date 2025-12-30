@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     class Config:
         env_prefix = "TASK_ORCHESTRATOR_"
         env_file = ".env"
+        extra = "ignore"  # Ignore extra env vars like GOOGLE_API_KEY
 
 
 settings = Settings()

@@ -16,6 +16,7 @@ class ModelCapability(Enum):
     FUNCTION_CALLING = "function_calling"
     LONG_CONTEXT = "long_context"
     FAST_RESPONSE = "fast_response"
+    EMBEDDINGS = "embeddings"
 
 
 @dataclass

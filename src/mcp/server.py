@@ -1,0 +1,487 @@
+"""MCP Server for Task Orchestrator integration with Claude Code."""
+import asyncio
+import json
+import sys
+from datetime import datetime
+from typing import Any, Optional
+
+from ..core.cost_tracker import CostTracker, Provider, get_cost_tracker
+from ..agents.coordinator import CoordinatorAgent, TaskStatus, TaskSource
+from ..agents.email_agent import TaskPriority
+
+
+class TaskOrchestratorMCP:
+    """
+    MCP Server exposing task orchestrator functionality.
+
+    Tools:
+    - tasks_list: List and prioritize tasks
+    - tasks_add: Create a new task
+    - tasks_sync_email: Pull tasks from Gmail
+    - tasks_schedule: Schedule task on calendar
+    - tasks_complete: Mark task complete
+    - tasks_analyze: AI analysis of a task
+    - tasks_briefing: Get AI daily briefing
+    - cost_summary: View API cost summary
+    - cost_check: Check if API call is within budget
+    """
+
+    def __init__(self):
+        self.coordinator: Optional[CoordinatorAgent] = None
+        self.cost_tracker = get_cost_tracker()
+        self._initialized = False
+
+    async def initialize(self):
+        """Initialize the coordinator with agents."""
+        if self._initialized:
+            return
+
+        # Import here to avoid circular imports
+        from ..llm import GeminiProvider, ModelRouter
+
+        # Check budget before initializing LLM
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
+        if not can_proceed:
+            raise RuntimeError(f"Cannot initialize: {msg}")
+
+        try:
+            provider = GeminiProvider()
+            router = ModelRouter({"google": provider})
+            self.coordinator = CoordinatorAgent(llm_router=router)
+            self._initialized = True
+        except ValueError as e:
+            # API key not set - coordinator without LLM
+            self.coordinator = CoordinatorAgent()
+            self._initialized = True
+
+    def get_tools(self) -> list[dict]:
+        """Return MCP tool definitions."""
+        return [
+            {
+                "name": "tasks_list",
+                "description": "List tasks sorted by priority. Returns pending, scheduled, and in-progress tasks.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "enum": ["all", "pending", "scheduled", "in_progress", "completed"],
+                            "description": "Filter by status (default: all active)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max tasks to return (default: 10)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "tasks_add",
+                "description": "Create a new task in the system.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Task title"},
+                        "description": {"type": "string", "description": "Task details"},
+                        "priority": {
+                            "type": "string",
+                            "enum": ["low", "medium", "high", "critical"],
+                            "description": "Priority level (default: medium)",
+                        },
+                        "due_date": {
+                            "type": "string",
+                            "description": "Due date in ISO format (optional)",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Tags for categorization",
+                        },
+                        "estimated_minutes": {
+                            "type": "integer",
+                            "description": "Estimated time in minutes (default: 30)",
+                        },
+                        "auto_schedule": {
+                            "type": "boolean",
+                            "description": "Auto-schedule on calendar (default: false)",
+                        },
+                    },
+                    "required": ["title"],
+                },
+            },
+            {
+                "name": "tasks_sync_email",
+                "description": "Sync tasks from unread emails. Extracts actionable items from Gmail.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "max_emails": {
+                            "type": "integer",
+                            "description": "Max emails to process (default: 10)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "tasks_schedule",
+                "description": "Schedule a task on Google Calendar.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string", "description": "Task ID to schedule"},
+                        "preferred_time": {
+                            "type": "string",
+                            "description": "Preferred start time in ISO format (optional)",
+                        },
+                    },
+                    "required": ["task_id"],
+                },
+            },
+            {
+                "name": "tasks_complete",
+                "description": "Mark a task as completed.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string", "description": "Task ID to complete"},
+                        "notes": {"type": "string", "description": "Completion notes"},
+                    },
+                    "required": ["task_id"],
+                },
+            },
+            {
+                "name": "tasks_analyze",
+                "description": "Use AI to analyze a task and get insights (estimated time, subtasks, blockers).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string", "description": "Task ID to analyze"},
+                    },
+                    "required": ["task_id"],
+                },
+            },
+            {
+                "name": "tasks_briefing",
+                "description": "Get an AI-generated daily briefing of tasks and priorities.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+            {
+                "name": "cost_summary",
+                "description": "View API cost summary across all providers (Gemini, OpenAI, etc.).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "provider": {
+                            "type": "string",
+                            "enum": ["all", "google_gemini", "openai", "graphiti"],
+                            "description": "Filter by provider (default: all)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "cost_set_budget",
+                "description": "Set daily/monthly budget limits for a provider.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "provider": {
+                            "type": "string",
+                            "enum": ["google_gemini", "openai", "graphiti", "google_gmail", "google_calendar"],
+                            "description": "Provider to configure",
+                        },
+                        "daily_limit": {
+                            "type": "number",
+                            "description": "Daily budget in USD",
+                        },
+                        "monthly_limit": {
+                            "type": "number",
+                            "description": "Monthly budget in USD",
+                        },
+                    },
+                    "required": ["provider"],
+                },
+            },
+        ]
+
+    async def handle_tool_call(self, name: str, arguments: dict) -> Any:
+        """Handle an MCP tool call."""
+        await self.initialize()
+
+        handlers = {
+            "tasks_list": self._handle_tasks_list,
+            "tasks_add": self._handle_tasks_add,
+            "tasks_sync_email": self._handle_tasks_sync_email,
+            "tasks_schedule": self._handle_tasks_schedule,
+            "tasks_complete": self._handle_tasks_complete,
+            "tasks_analyze": self._handle_tasks_analyze,
+            "tasks_briefing": self._handle_tasks_briefing,
+            "cost_summary": self._handle_cost_summary,
+            "cost_set_budget": self._handle_cost_set_budget,
+        }
+
+        handler = handlers.get(name)
+        if not handler:
+            return {"error": f"Unknown tool: {name}"}
+
+        try:
+            return await handler(arguments)
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def _handle_tasks_list(self, args: dict) -> dict:
+        """List tasks."""
+        status_filter = args.get("status", "all")
+        limit = args.get("limit", 10)
+
+        if status_filter == "all":
+            tasks = await self.coordinator.prioritize_tasks()
+        else:
+            status = TaskStatus(status_filter)
+            tasks = self.coordinator.get_tasks_by_status(status)
+
+        return {
+            "count": len(tasks[:limit]),
+            "tasks": [t.to_dict() for t in tasks[:limit]],
+        }
+
+    async def _handle_tasks_add(self, args: dict) -> dict:
+        """Add a new task."""
+        priority_map = {
+            "low": TaskPriority.LOW,
+            "medium": TaskPriority.MEDIUM,
+            "high": TaskPriority.HIGH,
+            "critical": TaskPriority.CRITICAL,
+        }
+
+        due_date = None
+        if args.get("due_date"):
+            due_date = datetime.fromisoformat(args["due_date"])
+
+        task = await self.coordinator.add_task(
+            title=args["title"],
+            description=args.get("description", ""),
+            priority=priority_map.get(args.get("priority", "medium"), TaskPriority.MEDIUM),
+            due_date=due_date,
+            tags=args.get("tags", []),
+            estimated_minutes=args.get("estimated_minutes", 30),
+            auto_schedule=args.get("auto_schedule", False),
+        )
+
+        return {"success": True, "task": task.to_dict()}
+
+    async def _handle_tasks_sync_email(self, args: dict) -> dict:
+        """Sync from email."""
+        # Check budget first
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GMAIL)
+        if not can_proceed:
+            return {"error": msg, "budget_exceeded": True}
+
+        if not self.coordinator.email_agent:
+            return {"error": "Email agent not configured. Run oauth_setup.py first."}
+
+        new_tasks = await self.coordinator.sync_from_email()
+
+        # Track usage
+        await self.cost_tracker.record_usage(
+            provider=Provider.GOOGLE_GMAIL,
+            operation="sync_email",
+            metadata={"tasks_created": len(new_tasks)},
+        )
+
+        return {
+            "success": True,
+            "new_tasks_count": len(new_tasks),
+            "tasks": [t.to_dict() for t in new_tasks],
+        }
+
+    async def _handle_tasks_schedule(self, args: dict) -> dict:
+        """Schedule a task."""
+        # Check budget
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_CALENDAR)
+        if not can_proceed:
+            return {"error": msg, "budget_exceeded": True}
+
+        preferred_time = None
+        if args.get("preferred_time"):
+            preferred_time = datetime.fromisoformat(args["preferred_time"])
+
+        scheduled = await self.coordinator.schedule_task(
+            args["task_id"],
+            preferred_time=preferred_time,
+        )
+
+        if scheduled:
+            # Track usage
+            await self.cost_tracker.record_usage(
+                provider=Provider.GOOGLE_CALENDAR,
+                operation="schedule_task",
+            )
+            return {"success": True, "scheduled": True, "event_id": scheduled.event_id}
+
+        return {"success": False, "message": "Could not find available slot"}
+
+    async def _handle_tasks_complete(self, args: dict) -> dict:
+        """Complete a task."""
+        task = await self.coordinator.complete_task(
+            args["task_id"],
+            notes=args.get("notes", ""),
+        )
+        return {"success": True, "task": task.to_dict()}
+
+    async def _handle_tasks_analyze(self, args: dict) -> dict:
+        """AI task analysis."""
+        # Check budget
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
+        if not can_proceed:
+            return {"error": msg, "budget_exceeded": True}
+
+        if not self.coordinator.llm:
+            return {"error": "LLM not configured. Set GOOGLE_API_KEY in .env"}
+
+        analysis = await self.coordinator.analyze_task_with_llm(args["task_id"])
+
+        # Track usage (estimate since we don't have exact tokens here)
+        await self.cost_tracker.record_usage(
+            provider=Provider.GOOGLE_GEMINI,
+            operation="analyze_task",
+            input_tokens=500,  # Estimate
+            output_tokens=300,
+            model="gemini-2.5-flash",
+        )
+
+        return {"success": True, "analysis": analysis}
+
+    async def _handle_tasks_briefing(self, args: dict) -> dict:
+        """AI daily briefing."""
+        # Check budget
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
+        if not can_proceed:
+            return {"error": msg, "budget_exceeded": True}
+
+        if not self.coordinator.llm:
+            return {"error": "LLM not configured. Set GOOGLE_API_KEY in .env"}
+
+        briefing = await self.coordinator.get_ai_daily_briefing()
+
+        # Track usage
+        await self.cost_tracker.record_usage(
+            provider=Provider.GOOGLE_GEMINI,
+            operation="daily_briefing",
+            input_tokens=800,
+            output_tokens=500,
+            model="gemini-2.5-flash",
+        )
+
+        return {"success": True, "briefing": briefing}
+
+    async def _handle_cost_summary(self, args: dict) -> dict:
+        """Get cost summary."""
+        summary = self.cost_tracker.get_summary()
+
+        provider_filter = args.get("provider", "all")
+        if provider_filter != "all":
+            # Filter to specific provider
+            filtered = {
+                "generated_at": summary["generated_at"],
+                "providers": {provider_filter: summary["providers"].get(provider_filter, {})},
+                "totals": summary["totals"],
+            }
+            return filtered
+
+        return summary
+
+    async def _handle_cost_set_budget(self, args: dict) -> dict:
+        """Set budget limits."""
+        provider = Provider(args["provider"])
+
+        self.cost_tracker.set_budget(
+            provider,
+            daily_limit=args.get("daily_limit"),
+            monthly_limit=args.get("monthly_limit"),
+        )
+
+        return {
+            "success": True,
+            "provider": provider.value,
+            "new_limits": {
+                "daily": self.cost_tracker.budgets[provider].daily_limit_usd,
+                "monthly": self.cost_tracker.budgets[provider].monthly_limit_usd,
+            },
+        }
+
+
+async def run_mcp_server():
+    """Run as stdio MCP server."""
+    server = TaskOrchestratorMCP()
+
+    # Read from stdin, write to stdout
+    while True:
+        try:
+            line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+            if not line:
+                break
+
+            request = json.loads(line.strip())
+            method = request.get("method", "")
+            req_id = request.get("id")
+
+            if method == "initialize":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {
+                            "name": "task-orchestrator",
+                            "version": "1.0.0",
+                        },
+                    },
+                }
+            elif method == "tools/list":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"tools": server.get_tools()},
+                }
+            elif method == "tools/call":
+                params = request.get("params", {})
+                result = await server.handle_tool_call(
+                    params.get("name", ""),
+                    params.get("arguments", {}),
+                )
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                }
+            elif method.startswith("notifications/"):
+                # Notifications don't get responses
+                continue
+            else:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32601, "message": f"Unknown method: {method}"},
+                }
+
+            print(json.dumps(response), flush=True)
+
+        except json.JSONDecodeError:
+            continue
+        except Exception as e:
+            if req_id:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32000, "message": str(e)},
+                }
+                print(json.dumps(error_response), flush=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(run_mcp_server())

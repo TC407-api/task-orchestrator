@@ -6,6 +6,7 @@ import google.generativeai as genai
 from google.generativeai.types import GenerationConfig
 
 from .base import LLMProvider, LLMResponse, Message, ModelCapability, ModelInfo
+from ..core.cost_tracker import Provider, get_cost_tracker
 
 
 # Available Gemini models with their capabilities
@@ -127,9 +128,29 @@ class GeminiProvider(LLMProvider):
     - Gemini 3.0 Flash/Pro (Preview)
     - Gemini 2.5 Flash/Flash-Lite
     - Gemini 2.0 Flash/Flash-Lite
+
+    Includes automatic cost tracking with budget enforcement.
     """
 
     provider_name = "google"
+
+    async def _track_usage(self, model: str, input_tokens: int, output_tokens: int):
+        """Track API usage for cost monitoring."""
+        tracker = get_cost_tracker()
+        await tracker.record_usage(
+            provider=Provider.GOOGLE_GEMINI,
+            operation="generate",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model,
+        )
+
+    def _check_budget(self):
+        """Check if we can proceed with API call."""
+        tracker = get_cost_tracker()
+        can_proceed, msg = tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
+        if not can_proceed:
+            raise RuntimeError(f"Budget exceeded: {msg}")
 
     def __init__(
         self,
@@ -172,6 +193,9 @@ class GeminiProvider(LLMProvider):
         **kwargs,
     ) -> LLMResponse:
         """Generate a response from Gemini."""
+        # Check budget before making API call
+        self._check_budget()
+
         model_id = self._resolve_model(model or self.default_model)
         client = self._get_client(model_id)
 
@@ -197,6 +221,13 @@ class GeminiProvider(LLMProvider):
                 "input_tokens": response.usage_metadata.prompt_token_count,
                 "output_tokens": response.usage_metadata.candidates_token_count,
             }
+
+        # Track usage for cost monitoring
+        await self._track_usage(
+            model_id,
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+        )
 
         return LLMResponse(
             content=response.text,

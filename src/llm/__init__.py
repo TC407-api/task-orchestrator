@@ -1,6 +1,7 @@
 """LLM providers for multi-model orchestration."""
 from .base import LLMProvider, LLMResponse, ModelCapability, ModelInfo, Message
 from .gemini import GeminiProvider, VertexGeminiProvider
+from .openai_provider import OpenAIProvider
 from .router import ModelRouter, TaskType, RoutingConfig
 
 __all__ = [
@@ -11,6 +12,7 @@ __all__ = [
     "Message",
     "GeminiProvider",
     "VertexGeminiProvider",
+    "OpenAIProvider",
     "ModelRouter",
     "TaskType",
     "RoutingConfig",
