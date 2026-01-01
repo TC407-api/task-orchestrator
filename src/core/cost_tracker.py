@@ -53,13 +53,15 @@ class BudgetConfig:
     hard_stop_enabled: bool = True  # Stop API calls when limit hit
 
 
-# Default conservative budgets
+# Default conservative budgets (updated Dec 2025)
+# Strategy: Lean on Anthropic Max Plan (free), use Gemini 3 Preview (free)
+# Only Gemini paid fallback needs real budget
 DEFAULT_BUDGETS = {
-    Provider.GOOGLE_GEMINI: BudgetConfig(daily_limit_usd=2.0, monthly_limit_usd=30.0),
-    Provider.GOOGLE_GMAIL: BudgetConfig(daily_limit_usd=0.50, monthly_limit_usd=10.0),
-    Provider.GOOGLE_CALENDAR: BudgetConfig(daily_limit_usd=0.50, monthly_limit_usd=10.0),
-    Provider.OPENAI: BudgetConfig(daily_limit_usd=1.0, monthly_limit_usd=20.0),
-    Provider.GRAPHITI: BudgetConfig(daily_limit_usd=1.0, monthly_limit_usd=20.0),
+    Provider.GOOGLE_GEMINI: BudgetConfig(daily_limit_usd=1.0, monthly_limit_usd=20.0),  # Conservative
+    Provider.GOOGLE_GMAIL: BudgetConfig(daily_limit_usd=0.25, monthly_limit_usd=5.0),
+    Provider.GOOGLE_CALENDAR: BudgetConfig(daily_limit_usd=0.25, monthly_limit_usd=5.0),
+    Provider.OPENAI: BudgetConfig(daily_limit_usd=0.50, monthly_limit_usd=10.0),  # For Graphiti embeddings
+    Provider.GRAPHITI: BudgetConfig(daily_limit_usd=0.50, monthly_limit_usd=10.0),
     Provider.ANTHROPIC: BudgetConfig(daily_limit_usd=0.0, monthly_limit_usd=0.0),  # Max plan = free
 }
 

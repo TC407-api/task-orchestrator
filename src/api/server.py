@@ -1,11 +1,16 @@
 """FastAPI server for Task Orchestrator."""
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
+from .auth import get_current_user, TokenData
 from ..agents.coordinator import (
     CoordinatorAgent,
     Task,
@@ -23,6 +28,12 @@ from ..core.config import settings
 
 # Global coordinator instance
 coordinator: Optional[CoordinatorAgent] = None
+
+# Rate limiter configuration
+limiter = Limiter(key_func=get_remote_address)
+
+# Type alias for authenticated user dependency
+AuthenticatedUser = Annotated[TokenData, Depends(get_current_user)]
 
 
 @asynccontextmanager
@@ -79,6 +90,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Add rate limiter to app state and exception handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # --- Request/Response Models ---
@@ -139,8 +154,9 @@ class ScheduleResponse(BaseModel):
 # --- Endpoints ---
 
 @app.get("/")
-async def root():
-    """Health check endpoint."""
+@app.get("/health")
+async def health_check():
+    """Health check endpoint - no authentication required."""
     return {
         "status": "healthy",
         "service": "task-orchestrator",
@@ -149,12 +165,15 @@ async def root():
 
 
 @app.get("/tasks", response_model=list[TaskResponse])
+@limiter.limit("100/minute")
 async def list_tasks(
+    request: Request,
+    current_user: AuthenticatedUser,
     status: Optional[str] = Query(None, description="Filter by status"),
     priority: Optional[str] = Query(None, description="Filter by priority"),
     source: Optional[str] = Query(None, description="Filter by source"),
 ):
-    """List all tasks with optional filters."""
+    """List all tasks with optional filters. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -186,8 +205,13 @@ async def list_tasks(
 
 
 @app.post("/tasks", response_model=TaskResponse, status_code=201)
-async def create_task(task: TaskCreate):
-    """Create a new task."""
+@limiter.limit("30/minute")
+async def create_task(
+    request: Request,
+    current_user: AuthenticatedUser,
+    task: TaskCreate,
+):
+    """Create a new task. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -211,8 +235,13 @@ async def create_task(task: TaskCreate):
 
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: str):
-    """Get a specific task."""
+@limiter.limit("100/minute")
+async def get_task(
+    request: Request,
+    current_user: AuthenticatedUser,
+    task_id: str,
+):
+    """Get a specific task. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -224,8 +253,14 @@ async def get_task(task_id: str):
 
 
 @app.patch("/tasks/{task_id}", response_model=TaskResponse)
-async def update_task(task_id: str, update: TaskUpdate):
-    """Update a task."""
+@limiter.limit("30/minute")
+async def update_task(
+    request: Request,
+    current_user: AuthenticatedUser,
+    task_id: str,
+    update: TaskUpdate,
+):
+    """Update a task. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -256,8 +291,13 @@ async def update_task(task_id: str, update: TaskUpdate):
 
 
 @app.delete("/tasks/{task_id}", status_code=204)
-async def delete_task(task_id: str):
-    """Delete a task."""
+@limiter.limit("30/minute")
+async def delete_task(
+    request: Request,
+    current_user: AuthenticatedUser,
+    task_id: str,
+):
+    """Delete a task. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -268,8 +308,14 @@ async def delete_task(task_id: str):
 
 
 @app.post("/tasks/{task_id}/complete", response_model=TaskResponse)
-async def complete_task(task_id: str, notes: str = ""):
-    """Mark a task as completed."""
+@limiter.limit("30/minute")
+async def complete_task(
+    request: Request,
+    current_user: AuthenticatedUser,
+    task_id: str,
+    notes: str = "",
+):
+    """Mark a task as completed. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -281,11 +327,14 @@ async def complete_task(task_id: str, notes: str = ""):
 
 
 @app.post("/tasks/{task_id}/schedule", response_model=ScheduleResponse)
+@limiter.limit("30/minute")
 async def schedule_task(
+    request: Request,
+    current_user: AuthenticatedUser,
     task_id: str,
     preferred_time: Optional[datetime] = None,
 ):
-    """Schedule a task on the calendar."""
+    """Schedule a task on the calendar. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -312,8 +361,12 @@ async def schedule_task(
 
 
 @app.post("/sync/email", response_model=SyncResponse)
-async def sync_from_email():
-    """Sync tasks from unread emails."""
+@limiter.limit("10/minute")
+async def sync_from_email(
+    request: Request,
+    current_user: AuthenticatedUser,
+):
+    """Sync tasks from unread emails. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -328,8 +381,12 @@ async def sync_from_email():
 
 
 @app.get("/summary/daily")
-async def get_daily_summary():
-    """Get daily summary of tasks and schedule."""
+@limiter.limit("30/minute")
+async def get_daily_summary(
+    request: Request,
+    current_user: AuthenticatedUser,
+):
+    """Get daily summary of tasks and schedule. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -337,8 +394,12 @@ async def get_daily_summary():
 
 
 @app.get("/tasks/prioritized", response_model=list[TaskResponse])
-async def get_prioritized_tasks():
-    """Get tasks sorted by priority."""
+@limiter.limit("60/minute")
+async def get_prioritized_tasks(
+    request: Request,
+    current_user: AuthenticatedUser,
+):
+    """Get tasks sorted by priority. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -347,8 +408,12 @@ async def get_prioritized_tasks():
 
 
 @app.get("/tasks/overdue", response_model=list[TaskResponse])
-async def get_overdue_tasks():
-    """Get overdue tasks."""
+@limiter.limit("60/minute")
+async def get_overdue_tasks(
+    request: Request,
+    current_user: AuthenticatedUser,
+):
+    """Get overdue tasks. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -357,8 +422,13 @@ async def get_overdue_tasks():
 
 
 @app.post("/schedule/auto")
-async def auto_schedule_tasks(max_tasks: int = 5):
-    """Automatically schedule pending tasks."""
+@limiter.limit("10/minute")
+async def auto_schedule_tasks(
+    request: Request,
+    current_user: AuthenticatedUser,
+    max_tasks: int = 5,
+):
+    """Automatically schedule pending tasks. Requires authentication."""
     if coordinator is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -378,11 +448,14 @@ async def auto_schedule_tasks(max_tasks: int = 5):
 
 
 @app.post("/focus/block")
+@limiter.limit("10/minute")
 async def block_focus_time(
+    request: Request,
+    current_user: AuthenticatedUser,
     duration_minutes: int = 120,
     days_ahead: int = 5,
 ):
-    """Block focus time on calendar."""
+    """Block focus time on calendar. Requires authentication."""
     if coordinator is None or coordinator.calendar_agent is None:
         raise HTTPException(503, "Calendar not available")
 

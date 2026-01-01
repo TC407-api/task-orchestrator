@@ -37,8 +37,9 @@ class Settings(BaseSettings):
     vertex_ai_rate_limit: int = 60
     gemini_rate_limit: int = 1000
 
-    # Model configuration - Gemini models (latest as of Dec 2024)
-    default_fast_model: str = "gemini-2.5-flash-lite"
+    # Model configuration - Gemini models (updated Dec 2025)
+    # Use gemini-3-flash-preview as default - FREE during preview period
+    default_fast_model: str = "gemini-3-flash-preview"
     default_balanced_model: str = "gemini-2.5-flash"
     default_reasoning_model: str = "gemini-3-pro-preview"
     default_code_model: str = "gemini-3-flash-preview"

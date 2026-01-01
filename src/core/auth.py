@@ -1,6 +1,6 @@
 """Authentication utilities for Google APIs."""
+import json
 import os
-import pickle
 from pathlib import Path
 from typing import Optional
 
@@ -33,10 +33,11 @@ def get_oauth_credentials(
 
     creds = None
 
-    # Load existing token if available
+    # Load existing token if available (JSON format for security)
     if token_path.exists():
-        with open(token_path, "rb") as token:
-            creds = pickle.load(token)
+        with open(token_path, "r") as token:
+            token_data = json.load(token)
+            creds = Credentials.from_authorized_user_info(token_data, scopes)
 
     # Refresh or get new credentials
     if not creds or not creds.valid:
@@ -54,10 +55,18 @@ def get_oauth_credentials(
             )
             creds = flow.run_local_server(port=0)
 
-        # Save token for next run
+        # Save token for next run (JSON format for security)
         token_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(token_path, "wb") as token:
-            pickle.dump(creds, token)
+        with open(token_path, "w") as token:
+            token_data = {
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "token_uri": creds.token_uri,
+                "client_id": creds.client_id,
+                "client_secret": creds.client_secret,
+                "scopes": list(creds.scopes) if creds.scopes else scopes,
+            }
+            json.dump(token_data, token)
 
     return creds
 

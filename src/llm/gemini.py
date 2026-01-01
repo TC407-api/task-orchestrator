@@ -7,6 +7,8 @@ from google.generativeai.types import GenerationConfig
 
 from .base import LLMProvider, LLMResponse, Message, ModelCapability, ModelInfo
 from ..core.cost_tracker import Provider, get_cost_tracker
+from ..core.rate_limiter import RateLimiter, CircuitBreaker
+from ..core.config import settings
 
 
 # Available Gemini models with their capabilities
@@ -130,9 +132,38 @@ class GeminiProvider(LLMProvider):
     - Gemini 2.0 Flash/Flash-Lite
 
     Includes automatic cost tracking with budget enforcement.
+
+    Guardrails:
+    - Rate limiting (requests per minute)
+    - Circuit breaker (consecutive failure protection)
+    - Budget enforcement (daily/monthly limits)
     """
 
     provider_name = "google"
+
+    # Shared rate limiter and circuit breaker across all instances
+    _rate_limiter: Optional[RateLimiter] = None
+    _circuit_breaker: Optional[CircuitBreaker] = None
+
+    @classmethod
+    def _get_rate_limiter(cls) -> RateLimiter:
+        """Get or create the shared rate limiter."""
+        if cls._rate_limiter is None:
+            cls._rate_limiter = RateLimiter(
+                requests_per_minute=settings.gemini_rate_limit
+            )
+        return cls._rate_limiter
+
+    @classmethod
+    def _get_circuit_breaker(cls) -> CircuitBreaker:
+        """Get or create the shared circuit breaker."""
+        if cls._circuit_breaker is None:
+            cls._circuit_breaker = CircuitBreaker(
+                failure_threshold=5,
+                recovery_timeout=60.0,
+                half_open_max_calls=3,
+            )
+        return cls._circuit_breaker
 
     async def _track_usage(self, model: str, input_tokens: int, output_tokens: int):
         """Track API usage for cost monitoring."""
@@ -151,6 +182,18 @@ class GeminiProvider(LLMProvider):
         can_proceed, msg = tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
         if not can_proceed:
             raise RuntimeError(f"Budget exceeded: {msg}")
+
+    def _check_circuit_breaker(self):
+        """Check if circuit breaker allows the call."""
+        breaker = self._get_circuit_breaker()
+        can_proceed, msg = breaker.can_proceed()
+        if not can_proceed:
+            raise RuntimeError(f"Circuit breaker: {msg}")
+
+    async def _apply_rate_limit(self):
+        """Wait for rate limit token."""
+        limiter = self._get_rate_limiter()
+        await limiter.async_wait()
 
     def __init__(
         self,
@@ -193,8 +236,13 @@ class GeminiProvider(LLMProvider):
         **kwargs,
     ) -> LLMResponse:
         """Generate a response from Gemini."""
-        # Check budget before making API call
+        # === GUARDRAILS: Check all safety gates before API call ===
+        # 1. Check budget
         self._check_budget()
+        # 2. Check circuit breaker
+        self._check_circuit_breaker()
+        # 3. Apply rate limit (waits if needed)
+        await self._apply_rate_limit()
 
         model_id = self._resolve_model(model or self.default_model)
         client = self._get_client(model_id)
@@ -209,10 +257,19 @@ class GeminiProvider(LLMProvider):
         if system_prompt:
             content = f"{system_prompt}\n\n{prompt}"
 
-        response = await client.generate_content_async(
-            content,
-            generation_config=config,
-        )
+        breaker = self._get_circuit_breaker()
+        try:
+            response = await client.generate_content_async(
+                content,
+                generation_config=config,
+            )
+            # Record success for circuit breaker
+            breaker.record_success()
+
+        except Exception as e:
+            # Record failure for circuit breaker
+            breaker.record_failure()
+            raise
 
         # Extract usage info
         usage = {}
@@ -237,6 +294,23 @@ class GeminiProvider(LLMProvider):
             finish_reason=response.candidates[0].finish_reason.name if response.candidates else "unknown",
             raw_response=response,
         )
+
+    def get_guardrails_status(self) -> dict:
+        """Get status of all guardrails."""
+        tracker = get_cost_tracker()
+        return {
+            "rate_limiter": {
+                "requests_per_minute": settings.gemini_rate_limit,
+                "tokens_available": self._get_rate_limiter().tokens,
+            },
+            "circuit_breaker": self._get_circuit_breaker().get_status(),
+            "budget": {
+                "daily_spent": tracker.get_daily_spend(Provider.GOOGLE_GEMINI),
+                "monthly_spent": tracker.get_monthly_spend(Provider.GOOGLE_GEMINI),
+                "daily_limit": tracker.budgets[Provider.GOOGLE_GEMINI].daily_limit_usd,
+                "monthly_limit": tracker.budgets[Provider.GOOGLE_GEMINI].monthly_limit_usd,
+            },
+        }
 
     async def generate_stream(
         self,
@@ -281,6 +355,11 @@ class GeminiProvider(LLMProvider):
         **kwargs,
     ) -> LLMResponse:
         """Multi-turn chat with Gemini."""
+        # === GUARDRAILS: Check all safety gates before API call ===
+        self._check_budget()
+        self._check_circuit_breaker()
+        await self._apply_rate_limit()
+
         model_id = self._resolve_model(model or self.default_model)
         client = self._get_client(model_id)
 
@@ -309,10 +388,16 @@ class GeminiProvider(LLMProvider):
         if system_instruction:
             last_message = f"{system_instruction}\n\n{last_message}"
 
-        response = await chat.send_message_async(
-            last_message,
-            generation_config=config,
-        )
+        breaker = self._get_circuit_breaker()
+        try:
+            response = await chat.send_message_async(
+                last_message,
+                generation_config=config,
+            )
+            breaker.record_success()
+        except Exception as e:
+            breaker.record_failure()
+            raise
 
         usage = {}
         if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -320,6 +405,13 @@ class GeminiProvider(LLMProvider):
                 "input_tokens": response.usage_metadata.prompt_token_count,
                 "output_tokens": response.usage_metadata.candidates_token_count,
             }
+
+        # Track usage
+        await self._track_usage(
+            model_id,
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+        )
 
         return LLMResponse(
             content=response.text,
