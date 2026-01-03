@@ -10,6 +10,19 @@ from ..core.cost_tracker import Provider, get_cost_tracker
 from ..core.rate_limiter import RateLimiter, CircuitBreaker
 from ..core.config import settings
 
+# Grade 5 Langfuse Tracing
+try:
+    from ..core.tracing import observe, flush_traces, langfuse
+    TRACING_ENABLED = langfuse is not None
+except ImportError:
+    TRACING_ENABLED = False
+    def observe(name=None, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    def flush_traces():
+        pass
+
 
 # Available Gemini models with their capabilities
 GEMINI_MODELS = {
@@ -225,6 +238,7 @@ class GeminiProvider(LLMProvider):
         resolved = self._resolve_model(model)
         return genai.GenerativeModel(resolved)
 
+    @observe(name="gemini.generate")
     async def generate(
         self,
         prompt: str,
@@ -345,6 +359,7 @@ class GeminiProvider(LLMProvider):
             if chunk.text:
                 yield chunk.text
 
+    @observe(name="gemini.chat")
     async def chat(
         self,
         messages: list[Message],

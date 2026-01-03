@@ -7,6 +7,18 @@ from typing import Optional
 
 from ..integrations.gmail import GmailClient, EmailMessage
 
+# Grade 5 Langfuse Tracing
+try:
+    from lib.tracing import observe, flush_traces
+except ImportError:
+    # Fallback if tracing not set up
+    def observe(name=None, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    def flush_traces():
+        pass
+
 
 class EmailCategory(Enum):
     """Email categorization."""
@@ -62,6 +74,7 @@ class EmailAgent:
         self.gmail = gmail_client
         self.llm = llm_client
 
+    @observe(name="email_agent.analyze_email")
     async def analyze_email(self, email: EmailMessage) -> EmailAnalysis:
         """
         Analyze an email and extract actionable information.
@@ -161,6 +174,7 @@ Respond in JSON format:
     "suggested_response": "draft response if needed, or null"
 }}"""
 
+    @observe(name="email_agent.llm_call")
     async def _call_llm(self, prompt: str) -> str:
         """Call LLM with prompt."""
         if self.llm is None:
@@ -213,6 +227,7 @@ Respond in JSON format:
             sentiment=data.get("sentiment", "neutral"),
         )
 
+    @observe(name="email_agent.process_unread")
     async def process_unread(
         self, max_emails: int = 50
     ) -> list[EmailAnalysis]:
@@ -237,8 +252,11 @@ Respond in JSON format:
             analysis = await self.analyze_email(email)
             analyses.append(analysis)
 
+        # Flush traces to Langfuse
+        flush_traces()
         return analyses
 
+    @observe(name="email_agent.draft_response")
     async def draft_response(
         self,
         email: EmailMessage,
