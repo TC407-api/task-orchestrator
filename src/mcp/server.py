@@ -8,6 +8,12 @@ from typing import Any, Optional
 from ..core.cost_tracker import CostTracker, Provider, get_cost_tracker
 from ..agents.coordinator import CoordinatorAgent, TaskStatus, TaskSource
 from ..agents.email_agent import TaskPriority
+from ..observability import trace_operation, get_tracer
+from ..self_healing import (
+    CircuitBreaker,
+    CircuitBreakerOpen,
+    get_healing_status,
+)
 
 
 class TaskOrchestratorMCP:
@@ -30,6 +36,11 @@ class TaskOrchestratorMCP:
         self.coordinator: Optional[CoordinatorAgent] = None
         self.cost_tracker = get_cost_tracker()
         self._initialized = False
+
+        # Initialize circuit breakers for external services
+        self._gmail_breaker = CircuitBreaker.get("gmail_service")
+        self._calendar_breaker = CircuitBreaker.get("calendar_service")
+        self._gemini_breaker = CircuitBreaker.get("gemini_service")
 
     async def initialize(self):
         """Initialize the coordinator with agents."""
@@ -205,6 +216,14 @@ class TaskOrchestratorMCP:
                     "required": ["provider"],
                 },
             },
+            {
+                "name": "healing_status",
+                "description": "Get self-healing system status including circuit breakers and retry state.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -221,6 +240,7 @@ class TaskOrchestratorMCP:
             "tasks_briefing": self._handle_tasks_briefing,
             "cost_summary": self._handle_cost_summary,
             "cost_set_budget": self._handle_cost_set_budget,
+            "healing_status": self._handle_healing_status,
         }
 
         handler = handlers.get(name)
@@ -232,6 +252,7 @@ class TaskOrchestratorMCP:
         except Exception as e:
             return {"error": str(e)}
 
+    @trace_operation("tasks_list")
     async def _handle_tasks_list(self, args: dict) -> dict:
         """List tasks."""
         status_filter = args.get("status", "all")
@@ -248,6 +269,7 @@ class TaskOrchestratorMCP:
             "tasks": [t.to_dict() for t in tasks[:limit]],
         }
 
+    @trace_operation("tasks_add")
     async def _handle_tasks_add(self, args: dict) -> dict:
         """Add a new task."""
         priority_map = {
@@ -273,9 +295,19 @@ class TaskOrchestratorMCP:
 
         return {"success": True, "task": task.to_dict()}
 
+    @trace_operation("tasks_sync_email")
     async def _handle_tasks_sync_email(self, args: dict) -> dict:
         """Sync from email."""
-        # Check budget first
+        # Check circuit breaker first
+        can_proceed, retry_after = self._gmail_breaker.is_available()
+        if not can_proceed:
+            return {
+                "error": f"Gmail service circuit breaker is open. Retry after {retry_after:.1f}s",
+                "circuit_breaker_open": True,
+                "retry_after_seconds": retry_after,
+            }
+
+        # Check budget
         can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GMAIL)
         if not can_proceed:
             return {"error": msg, "budget_exceeded": True}
@@ -283,23 +315,41 @@ class TaskOrchestratorMCP:
         if not self.coordinator.email_agent:
             return {"error": "Email agent not configured. Run oauth_setup.py first."}
 
-        new_tasks = await self.coordinator.sync_from_email()
+        try:
+            new_tasks = await self.coordinator.sync_from_email()
 
-        # Track usage
-        await self.cost_tracker.record_usage(
-            provider=Provider.GOOGLE_GMAIL,
-            operation="sync_email",
-            metadata={"tasks_created": len(new_tasks)},
-        )
+            # Record success in circuit breaker
+            self._gmail_breaker.record_success()
 
-        return {
-            "success": True,
-            "new_tasks_count": len(new_tasks),
-            "tasks": [t.to_dict() for t in new_tasks],
-        }
+            # Track usage
+            await self.cost_tracker.record_usage(
+                provider=Provider.GOOGLE_GMAIL,
+                operation="sync_email",
+                metadata={"tasks_created": len(new_tasks)},
+            )
 
+            return {
+                "success": True,
+                "new_tasks_count": len(new_tasks),
+                "tasks": [t.to_dict() for t in new_tasks],
+            }
+        except Exception as e:
+            # Record failure in circuit breaker
+            self._gmail_breaker.record_failure(e)
+            raise
+
+    @trace_operation("tasks_schedule")
     async def _handle_tasks_schedule(self, args: dict) -> dict:
         """Schedule a task."""
+        # Check circuit breaker first
+        can_proceed, retry_after = self._calendar_breaker.is_available()
+        if not can_proceed:
+            return {
+                "error": f"Calendar service circuit breaker is open. Retry after {retry_after:.1f}s",
+                "circuit_breaker_open": True,
+                "retry_after_seconds": retry_after,
+            }
+
         # Check budget
         can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_CALENDAR)
         if not can_proceed:
@@ -309,21 +359,30 @@ class TaskOrchestratorMCP:
         if args.get("preferred_time"):
             preferred_time = datetime.fromisoformat(args["preferred_time"])
 
-        scheduled = await self.coordinator.schedule_task(
-            args["task_id"],
-            preferred_time=preferred_time,
-        )
-
-        if scheduled:
-            # Track usage
-            await self.cost_tracker.record_usage(
-                provider=Provider.GOOGLE_CALENDAR,
-                operation="schedule_task",
+        try:
+            scheduled = await self.coordinator.schedule_task(
+                args["task_id"],
+                preferred_time=preferred_time,
             )
-            return {"success": True, "scheduled": True, "event_id": scheduled.event_id}
 
-        return {"success": False, "message": "Could not find available slot"}
+            if scheduled:
+                # Record success in circuit breaker
+                self._calendar_breaker.record_success()
 
+                # Track usage
+                await self.cost_tracker.record_usage(
+                    provider=Provider.GOOGLE_CALENDAR,
+                    operation="schedule_task",
+                )
+                return {"success": True, "scheduled": True, "event_id": scheduled.event_id}
+
+            return {"success": False, "message": "Could not find available slot"}
+        except Exception as e:
+            # Record failure in circuit breaker
+            self._calendar_breaker.record_failure(e)
+            raise
+
+    @trace_operation("tasks_complete")
     async def _handle_tasks_complete(self, args: dict) -> dict:
         """Complete a task."""
         task = await self.coordinator.complete_task(
@@ -332,6 +391,7 @@ class TaskOrchestratorMCP:
         )
         return {"success": True, "task": task.to_dict()}
 
+    @trace_operation("tasks_analyze")
     async def _handle_tasks_analyze(self, args: dict) -> dict:
         """AI task analysis."""
         # Check budget
@@ -355,6 +415,7 @@ class TaskOrchestratorMCP:
 
         return {"success": True, "analysis": analysis}
 
+    @trace_operation("tasks_briefing")
     async def _handle_tasks_briefing(self, args: dict) -> dict:
         """AI daily briefing."""
         # Check budget
@@ -378,6 +439,7 @@ class TaskOrchestratorMCP:
 
         return {"success": True, "briefing": briefing}
 
+    @trace_operation("cost_summary")
     async def _handle_cost_summary(self, args: dict) -> dict:
         """Get cost summary."""
         summary = self.cost_tracker.get_summary()
@@ -394,6 +456,7 @@ class TaskOrchestratorMCP:
 
         return summary
 
+    @trace_operation("cost_set_budget")
     async def _handle_cost_set_budget(self, args: dict) -> dict:
         """Set budget limits."""
         provider = Provider(args["provider"])
@@ -411,6 +474,21 @@ class TaskOrchestratorMCP:
                 "daily": self.cost_tracker.budgets[provider].daily_limit_usd,
                 "monthly": self.cost_tracker.budgets[provider].monthly_limit_usd,
             },
+        }
+
+    @trace_operation("healing_status")
+    async def _handle_healing_status(self, args: dict) -> dict:
+        """Get self-healing system status."""
+        status = get_healing_status()
+
+        # Add local circuit breaker status
+        status["circuit_breakers"]["gmail_service"] = self._gmail_breaker.get_stats()
+        status["circuit_breakers"]["calendar_service"] = self._calendar_breaker.get_stats()
+        status["circuit_breakers"]["gemini_service"] = self._gemini_breaker.get_stats()
+
+        return {
+            "success": True,
+            "healing_status": status,
         }
 
 
