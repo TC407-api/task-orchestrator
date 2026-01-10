@@ -114,6 +114,19 @@ async def async_client(mock_coordinator: MagicMock) -> AsyncClient:
 
 # --- Rate Limiting Fixtures ---
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Reset rate limiter state before each test to prevent cross-test pollution."""
+    # Reset the rate limiter storage before each test
+    # This prevents tests from hitting rate limits due to previous tests
+    if hasattr(app.state, "limiter") and app.state.limiter:
+        try:
+            app.state.limiter.reset()
+        except Exception:
+            pass  # Ignore errors if limiter doesn't support reset
+    yield
+
+
 @pytest.fixture
 def disable_rate_limiting():
     """Disable rate limiting for tests."""
