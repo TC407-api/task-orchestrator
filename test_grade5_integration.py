@@ -8,7 +8,6 @@ Tests all Grade 5 components working together:
 4. Prompt Optimization (DSPy feedback)
 """
 import asyncio
-import json
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -138,7 +137,7 @@ def test_observability():
     """Test 4: Observability tracing setup."""
     print("\n=== Test 4: Observability ===")
     try:
-        from observability import get_tracer, Tracer, MockSpan
+        from observability import get_tracer, Tracer
 
         tracer = get_tracer()
 

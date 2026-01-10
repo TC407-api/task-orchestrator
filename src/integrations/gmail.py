@@ -1,7 +1,6 @@
 """Gmail API integration."""
 import base64
 from dataclasses import dataclass
-from datetime import datetime
 from email.mime.text import MIMEText
 from typing import Optional
 

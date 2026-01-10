@@ -1,9 +1,9 @@
 """LLM-powered methods for the coordinator agent."""
 import json
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..llm import ModelRouter, TaskType
+    pass
 
 
 class LLMMixin:

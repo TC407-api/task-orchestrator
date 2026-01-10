@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 
 from src.api.server import app
-from src.api.auth.jwt import create_access_token, TokenData
+from src.api.auth.jwt import create_access_token
 
 
 # --- Authentication Fixtures ---

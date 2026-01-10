@@ -1,12 +1,10 @@
 """API cost tracking with budgets, alerts, and circuit breakers."""
 import json
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Optional
-import asyncio
 
 
 class Provider(Enum):
@@ -246,7 +244,6 @@ class CostTracker:
     def get_summary(self) -> dict:
         """Get comprehensive cost summary."""
         now = datetime.now()
-        today = now.date()
 
         summary = {
             "generated_at": now.isoformat(),

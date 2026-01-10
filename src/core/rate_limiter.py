@@ -131,7 +131,7 @@ class CircuitBreaker:
             if self._state == CircuitState.HALF_OPEN:
                 # Failed during recovery test - reopen
                 self._state = CircuitState.OPEN
-                print(f"Circuit OPEN - recovery failed")
+                print("Circuit OPEN - recovery failed")
 
             elif self._state == CircuitState.CLOSED:
                 if self._failure_count >= self.failure_threshold:

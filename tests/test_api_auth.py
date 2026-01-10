@@ -5,7 +5,6 @@ from unittest.mock import patch, MagicMock
 
 from fastapi.testclient import TestClient
 
-from src.api.server import app
 from src.api.auth.jwt import create_access_token, verify_token, JWT_SECRET_KEY
 from jose import jwt
 

@@ -174,7 +174,7 @@ class CrossProjectLearning:
                         group_id=p.group_id,
                         metadata=p.metadata,
                     ))
-            except Exception as e:
+            except Exception:
                 # Log error but continue
                 pass
 

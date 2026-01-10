@@ -280,7 +280,7 @@ class GeminiProvider(LLMProvider):
             # Record success for circuit breaker
             breaker.record_success()
 
-        except Exception as e:
+        except Exception:
             # Record failure for circuit breaker
             breaker.record_failure()
             raise
@@ -410,7 +410,7 @@ class GeminiProvider(LLMProvider):
                 generation_config=config,
             )
             breaker.record_success()
-        except Exception as e:
+        except Exception:
             breaker.record_failure()
             raise
 
@@ -576,7 +576,6 @@ class VertexGeminiProvider(LLMProvider):
         """Chat via Vertex AI."""
         # Similar implementation to GeminiProvider.chat
         model_id = self._resolve_model(model or self.default_model)
-        client = self._GenerativeModel(model_id)
 
         # Convert last message to prompt
         last_content = messages[-1].content if messages else ""

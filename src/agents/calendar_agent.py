@@ -290,7 +290,8 @@ class CalendarAgent:
 
         # Get free/busy for all attendees
         calendars = ["primary"] + attendees
-        free_busy = self.calendar.get_free_busy(time_min, time_max, calendars)
+        # TODO: Use free_busy data for multi-calendar conflict detection
+        _ = self.calendar.get_free_busy(time_min, time_max, calendars)
 
         # Find slots free for everyone
         # Simplified: just use primary calendar's free slots
