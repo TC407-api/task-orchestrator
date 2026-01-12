@@ -436,6 +436,53 @@ class TaskOrchestratorMCP:
                     },
                 },
             },
+            # Live Sync Tools (Phase 10)
+            {
+                "name": "sync_status",
+                "description": "Get live sync health status for all federated projects.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Filter to specific project (optional)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "sync_trigger",
+                "description": "Trigger a manual sync cycle for federated patterns.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "direction": {
+                            "type": "string",
+                            "enum": ["push", "pull", "both"],
+                            "description": "Sync direction (default: both)",
+                            "default": "both",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Target specific project (optional)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "sync_alerts",
+                "description": "Get sync-related alerts for federation health issues.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {
+                            "type": "string",
+                            "enum": ["healthy", "degraded", "critical"],
+                            "description": "Filter by severity (optional)",
+                        },
+                    },
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -467,6 +514,10 @@ class TaskOrchestratorMCP:
             "federation_subscribe": self._handle_federation_subscribe,
             "federation_search": self._handle_federation_search,
             "federation_decay": self._handle_federation_decay,
+            # Live Sync handlers
+            "sync_status": self._handle_sync_status,
+            "sync_trigger": self._handle_sync_trigger,
+            "sync_alerts": self._handle_sync_alerts,
         }
 
         handler = handlers.get(name)
@@ -1082,6 +1133,122 @@ class TaskOrchestratorMCP:
         return {
             "success": False,
             "error": f"Unknown action: {action}",
+        }
+
+    @trace_operation("sync_status")
+    async def _handle_sync_status(self, args: dict) -> dict:
+        """Get live sync health status for federated projects."""
+        from ..evaluation.immune_system.live_sync import SyncHealthMonitor
+
+        # Get or create sync monitor singleton
+        if not hasattr(self, '_sync_monitor'):
+            self._sync_monitor = SyncHealthMonitor()
+
+        project_id = args.get("project_id")
+
+        if project_id:
+            status = self._sync_monitor.get_project_status(project_id)
+            if status:
+                return {
+                    "success": True,
+                    "project": status,
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Project {project_id} not found in sync monitor",
+                }
+
+        return {
+            "success": True,
+            "dashboard": self._sync_monitor.get_dashboard_metrics(),
+        }
+
+    @trace_operation("sync_trigger")
+    async def _handle_sync_trigger(self, args: dict) -> dict:
+        """Trigger a manual sync cycle for federated patterns."""
+        from ..evaluation.immune_system.live_sync import SyncEngine
+        from ..evaluation.immune_system import get_registry_manager
+
+        direction = args.get("direction", "both")
+        project_id = args.get("project_id")
+
+        # Get or create sync engine singleton
+        if not hasattr(self, '_sync_engine'):
+            self._sync_engine = SyncEngine(
+                project_id="task-orchestrator",
+                store=None,  # No store configured yet
+                transport=None,  # No transport configured yet
+            )
+            # Register known projects
+            registry = get_registry_manager()
+            for pid, proj in registry.projects.items():
+                if pid != "task-orchestrator":
+                    self._sync_engine.register_peer(
+                        pid,
+                        is_subscriber=True,
+                        is_subscription=True
+                    )
+
+        result = {
+            "success": True,
+            "direction": direction,
+            "timestamp": __import__('time').time(),
+        }
+
+        if direction in ("pull", "both"):
+            if project_id:
+                if project_id in self._sync_engine._sync_states:
+                    result["pull"] = {project_id: "Sync not configured (no transport)"}
+                else:
+                    result["pull"] = {project_id: "Project not registered"}
+            else:
+                result["pull"] = self._sync_engine.trigger_pull_sync()
+
+        if direction in ("push", "both"):
+            if project_id:
+                if project_id in self._sync_engine._sync_states:
+                    result["push"] = {project_id: "Sync not configured (no transport)"}
+                else:
+                    result["push"] = {project_id: "Project not registered"}
+            else:
+                result["push"] = self._sync_engine.trigger_push_sync()
+
+        return result
+
+    @trace_operation("sync_alerts")
+    async def _handle_sync_alerts(self, args: dict) -> dict:
+        """Get sync-related alerts for federation health issues."""
+        from ..evaluation.immune_system.live_sync import SyncHealthMonitor, SyncStatus
+
+        # Get or create sync monitor singleton
+        if not hasattr(self, '_sync_monitor'):
+            self._sync_monitor = SyncHealthMonitor()
+
+        severity_filter = args.get("severity")
+
+        alerts = self._sync_monitor.check_health_and_alert()
+
+        # Filter by severity if specified
+        if severity_filter:
+            try:
+                target_status = SyncStatus(severity_filter)
+                alerts = [a for a in alerts if a.severity == target_status]
+            except ValueError:
+                pass  # Invalid severity, return all
+
+        return {
+            "success": True,
+            "alert_count": len(alerts),
+            "alerts": [
+                {
+                    "project_id": a.project_id,
+                    "severity": a.severity.value,
+                    "message": a.message,
+                    "timestamp": a.timestamp,
+                }
+                for a in alerts
+            ],
         }
 
     @trace_operation("spawn_agent")
