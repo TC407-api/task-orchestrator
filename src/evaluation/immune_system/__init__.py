@@ -58,6 +58,23 @@ from .federation import (
     FederatedPattern,
     ScoredPattern,
 )
+from .registry import (
+    PortfolioProject,
+    RegistryConfig,
+    RegistryManager,
+    get_registry_manager,
+    reset_registry_manager,
+    REGISTRY_GROUP_ID,
+)
+from .decay import (
+    PatternDecaySystem,
+    DecayMetadata,
+    InteractionOutcome,
+    get_decay_system,
+    reset_decay_system,
+    DEFAULT_HALF_LIFE_HOURS,
+    STALENESS_THRESHOLD_DAYS,
+)
 
 
 __all__ = [
@@ -85,4 +102,19 @@ __all__ = [
     "PatternVisibility",
     "FederatedPattern",
     "ScoredPattern",
+    # Registry (Phase 9 - Federation Enhancement)
+    "PortfolioProject",
+    "RegistryConfig",
+    "RegistryManager",
+    "get_registry_manager",
+    "reset_registry_manager",
+    "REGISTRY_GROUP_ID",
+    # Decay System (Phase 9)
+    "PatternDecaySystem",
+    "DecayMetadata",
+    "InteractionOutcome",
+    "get_decay_system",
+    "reset_decay_system",
+    "DEFAULT_HALF_LIFE_HOURS",
+    "STALENESS_THRESHOLD_DAYS",
 ]

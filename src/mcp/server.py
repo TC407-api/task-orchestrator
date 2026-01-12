@@ -373,6 +373,69 @@ class TaskOrchestratorMCP:
                     "required": ["prompt"],
                 },
             },
+            # Federation Tools (Phase 9)
+            {
+                "name": "federation_status",
+                "description": "Get federation health status, subscriptions, and shared patterns across portfolio projects.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "include_projects": {
+                            "type": "boolean",
+                            "description": "Include full project details (default: false)",
+                            "default": False,
+                        },
+                    },
+                },
+            },
+            {
+                "name": "federation_subscribe",
+                "description": "Subscribe to patterns from another portfolio project.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project ID to subscribe to (e.g., 'construction-connect')",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+            },
+            {
+                "name": "federation_search",
+                "description": "Search for patterns across subscribed federated projects.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query for patterns",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum results to return (default: 10)",
+                            "default": 10,
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "federation_decay",
+                "description": "Evaluate pattern decay status and identify stale/prunable patterns.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["status", "evaluate", "prune_candidates"],
+                            "description": "Action to perform (default: status)",
+                            "default": "status",
+                        },
+                    },
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -400,6 +463,10 @@ class TaskOrchestratorMCP:
             "alert_list": self._handle_alert_list,
             "alert_clear": self._handle_alert_clear,
             "predict_risk": self._handle_predict_risk,
+            "federation_status": self._handle_federation_status,
+            "federation_subscribe": self._handle_federation_subscribe,
+            "federation_search": self._handle_federation_search,
+            "federation_decay": self._handle_federation_decay,
         }
 
         handler = handlers.get(name)
@@ -820,6 +887,201 @@ class TaskOrchestratorMCP:
             "success": True,
             "prediction": result.to_dict(),
             "model_active": self._predictor.is_active,
+        }
+
+    # =========================================================================
+    # Federation Tools (Phase 9)
+    # =========================================================================
+
+    @trace_operation("federation_status")
+    async def _handle_federation_status(self, args: dict) -> dict:
+        """Get federation status across portfolio projects."""
+        from ..evaluation.immune_system import (
+            get_registry_manager,
+            PatternFederation,
+            get_decay_system,
+        )
+
+        # Get or create registry (lazy singleton)
+        if not hasattr(self, '_registry'):
+            self._registry = get_registry_manager()
+
+        # Get or create federation
+        if not hasattr(self, '_federation'):
+            self._federation = PatternFederation(
+                graphiti_client=None,  # Will be set if available
+                local_group_id="project_task_orchestrator",
+            )
+
+        include_projects = args.get("include_projects", False)
+
+        result = {
+            "success": True,
+            "registry": self._registry.get_stats(),
+            "federation": self._federation.get_stats(),
+            "decay": get_decay_system().get_stats(),
+        }
+
+        if include_projects:
+            result["projects"] = [
+                p.to_dict() for p in self._registry.projects.values()
+            ]
+
+        return result
+
+    @trace_operation("federation_subscribe")
+    async def _handle_federation_subscribe(self, args: dict) -> dict:
+        """Subscribe to another project's patterns."""
+        from ..evaluation.immune_system import (
+            get_registry_manager,
+            PatternFederation,
+        )
+
+        project_id = args["project_id"]
+
+        # Get or create registry
+        if not hasattr(self, '_registry'):
+            self._registry = get_registry_manager()
+
+        # Get or create federation
+        if not hasattr(self, '_federation'):
+            self._federation = PatternFederation(
+                graphiti_client=None,
+                local_group_id="project_task_orchestrator",
+            )
+
+        # Check if project exists
+        project = await self._registry.get_project(project_id)
+        if not project:
+            return {
+                "success": False,
+                "error": f"Project '{project_id}' not found in registry",
+                "available_projects": list(self._registry.projects.keys()),
+            }
+
+        # Subscribe via federation
+        result = await self._federation.subscribe_to_project(project.group_id)
+
+        # Update local project subscriptions
+        local_project = await self._registry.get_project("task-orchestrator")
+        if local_project and project_id not in local_project.subscriptions:
+            local_project.subscriptions.append(project_id)
+
+        return {
+            "success": True,
+            "subscribed_to": project_id,
+            "group_id": project.group_id,
+            "total_subscriptions": len(self._federation.subscriptions),
+        }
+
+    @trace_operation("federation_search")
+    async def _handle_federation_search(self, args: dict) -> dict:
+        """Search patterns across federated projects."""
+        from ..evaluation.immune_system import PatternFederation
+
+        query = args["query"]
+        limit = args.get("limit", 10)
+
+        # Get or create federation
+        if not hasattr(self, '_federation'):
+            self._federation = PatternFederation(
+                graphiti_client=None,
+                local_group_id="project_task_orchestrator",
+            )
+
+        try:
+            results = await self._federation.search_global_patterns(query, limit)
+
+            return {
+                "success": True,
+                "query": query,
+                "results_count": len(results),
+                "results": [
+                    {
+                        "pattern_id": r.pattern.id,
+                        "operation": r.pattern.operation,
+                        "failure_type": r.pattern.failure_type,
+                        "relevance_score": r.relevance_score,
+                        "source_project": r.source_project,
+                        "match_reason": r.match_reason,
+                    }
+                    for r in results
+                ],
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    @trace_operation("federation_decay")
+    async def _handle_federation_decay(self, args: dict) -> dict:
+        """Evaluate pattern decay and staleness."""
+        from ..evaluation.immune_system import (
+            get_decay_system,
+            get_immune_system,
+        )
+
+        action = args.get("action", "status")
+        decay = get_decay_system()
+
+        if action == "status":
+            return {
+                "success": True,
+                "action": "status",
+                "stats": decay.get_stats(),
+            }
+
+        elif action == "evaluate":
+            # Get patterns from immune system
+            immune = get_immune_system()
+            store_stats = immune._failure_store.get_stats()
+
+            # Get all patterns for evaluation
+            patterns = immune._failure_store.get_all_patterns()
+            pattern_dicts = [
+                {
+                    "id": p.id,
+                    "decay_metadata": p.context.get("decay_metadata") if p.context else None,
+                }
+                for p in patterns
+            ]
+
+            # Run batch evaluation
+            eval_result = decay.batch_evaluate(pattern_dicts)
+
+            return {
+                "success": True,
+                "action": "evaluate",
+                "total_patterns": store_stats["total_patterns"],
+                "evaluation": eval_result,
+            }
+
+        elif action == "prune_candidates":
+            immune = get_immune_system()
+            patterns = immune._failure_store.get_all_patterns()
+
+            prune_candidates = []
+            for p in patterns:
+                metadata = p.context.get("decay_metadata") if p.context else None
+                if decay.should_prune(p.id, metadata):
+                    prune_candidates.append({
+                        "id": p.id,
+                        "operation": p.operation,
+                        "failure_type": p.failure_type,
+                        "current_score": decay.get_current_relevance(p.id, metadata),
+                    })
+
+            return {
+                "success": True,
+                "action": "prune_candidates",
+                "count": len(prune_candidates),
+                "candidates": prune_candidates,
+            }
+
+        return {
+            "success": False,
+            "error": f"Unknown action: {action}",
         }
 
     @trace_operation("spawn_agent")
