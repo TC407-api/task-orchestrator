@@ -25,6 +25,12 @@ from .graders import (
     LengthGrader,
     ContainsGrader,
     NotContainsGrader,
+    # Model-based graders
+    ModelGrader,
+    RelevanceGrader,
+    CompletenessGrader,
+    AccuracyGrader,
+    FormatGrader,
 )
 from .integration import score_trial, score_grader_result, create_eval_span
 from .export import TrainingDataExporter, get_exporter
@@ -45,7 +51,7 @@ __all__ = [
     # Core
     "Trial",
     "GraderResult",
-    # Graders
+    # Code-based Graders
     "Grader",
     "GraderPipeline",
     "NonEmptyGrader",
@@ -55,6 +61,12 @@ __all__ = [
     "LengthGrader",
     "ContainsGrader",
     "NotContainsGrader",
+    # Model-based Graders (LLM-as-judge)
+    "ModelGrader",
+    "RelevanceGrader",
+    "CompletenessGrader",
+    "AccuracyGrader",
+    "FormatGrader",
     # Integration
     "score_trial",
     "score_grader_result",

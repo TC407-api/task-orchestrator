@@ -264,6 +264,44 @@ class TaskOrchestratorMCP:
                     "required": ["prompts"],
                 },
             },
+            {
+                "name": "immune_status",
+                "description": "Get immune system health and statistics including failure patterns and guardrail effectiveness.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+            {
+                "name": "immune_check",
+                "description": "Pre-check a prompt for risks without executing it. Returns risk score and suggestions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": "The prompt to evaluate"},
+                        "operation": {
+                            "type": "string",
+                            "description": "Operation type (spawn_agent, spawn_parallel_agent)",
+                            "default": "spawn_agent",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            },
+            {
+                "name": "immune_failures",
+                "description": "List recent failure patterns stored in the immune system memory.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum patterns to return (default: 10)",
+                            "default": 10,
+                        },
+                    },
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -283,6 +321,9 @@ class TaskOrchestratorMCP:
             "healing_status": self._handle_healing_status,
             "spawn_agent": self._handle_spawn_agent,
             "spawn_parallel_agents": self._handle_spawn_parallel_agents,
+            "immune_status": self._handle_immune_status,
+            "immune_check": self._handle_immune_check,
+            "immune_failures": self._handle_immune_failures,
         }
 
         handler = handlers.get(name)
@@ -533,13 +574,86 @@ class TaskOrchestratorMCP:
             "healing_status": status,
         }
 
+    @trace_operation("immune_status")
+    async def _handle_immune_status(self, args: dict) -> dict:
+        """Get immune system health and statistics."""
+        from ..evaluation import get_immune_system
+
+        immune = get_immune_system()
+        stats = immune.get_stats()
+        health = immune.get_health()
+
+        return {
+            "success": True,
+            "immune_system": {
+                "health": health,
+                "statistics": stats,
+            },
+        }
+
+    @trace_operation("immune_check")
+    async def _handle_immune_check(self, args: dict) -> dict:
+        """Pre-check a prompt for risks without executing."""
+        from ..evaluation import get_immune_system
+
+        prompt = args.get("prompt")
+        if not prompt:
+            return {"error": "Prompt is required"}
+
+        operation = args.get("operation", "spawn_agent")
+        immune = get_immune_system()
+
+        # Get suggestions without actually processing
+        suggestions = await immune.get_suggestions(prompt, operation)
+
+        # Also do a pre-spawn check to get full response
+        response = await immune.pre_spawn_check(prompt, operation)
+
+        return {
+            "success": True,
+            "risk_assessment": {
+                "risk_score": response.risk_score,
+                "should_proceed": response.should_proceed,
+                "warnings": response.warnings,
+                "guardrails_would_apply": response.guardrails_applied,
+                "prompt_would_be_modified": response.original_prompt != response.processed_prompt,
+            },
+            "suggestions": suggestions,
+        }
+
+    @trace_operation("immune_failures")
+    async def _handle_immune_failures(self, args: dict) -> dict:
+        """List recent failure patterns."""
+        from ..evaluation import get_immune_system
+
+        limit = args.get("limit", 10)
+        immune = get_immune_system()
+
+        # Get failure store stats
+        stats = immune.get_stats()
+        failure_stats = stats.get("failure_store", {})
+
+        # Get recent failures from the store
+        recent = await immune._failure_store.get_recent_failures(limit=limit)
+
+        return {
+            "success": True,
+            "failure_patterns": {
+                "total_patterns": failure_stats.get("total_patterns", 0),
+                "total_occurrences": failure_stats.get("total_occurrences", 0),
+                "by_type": failure_stats.get("by_type", {}),
+                "by_operation": failure_stats.get("by_operation", {}),
+                "recent": [p.to_dict() for p in recent],
+            },
+        }
+
     @trace_operation("spawn_agent")
     async def _handle_spawn_agent(self, args: dict) -> dict:
         """Spawn a Gemini agent to execute a code task."""
         import time
         from ..evaluation import (
             Trial, GraderPipeline, NonEmptyGrader, LengthGrader,
-            score_trial, get_exporter
+            score_trial, get_exporter, get_immune_system
         )
 
         # Check circuit breaker
@@ -560,14 +674,31 @@ class TaskOrchestratorMCP:
             return {"error": "LLM not configured. Set GOOGLE_API_KEY in .env"}
 
         model = args.get("model", "gemini-3-flash-preview")
-        prompt = args["prompt"]
+        original_prompt = args["prompt"]
         system_prompt = args.get("system_prompt", "You are an expert code assistant. Provide clear, working code solutions.")
         max_tokens = args.get("max_tokens", 8192)
+
+        # Immune System: Pre-spawn check
+        immune = get_immune_system()
+        immune_response = await immune.pre_spawn_check(original_prompt, "spawn_agent")
+
+        # Check if immune system blocked the request
+        if not immune_response.should_proceed:
+            return {
+                "success": False,
+                "error": "Request blocked by Immune System due to high failure risk",
+                "immune_blocked": True,
+                "risk_score": immune_response.risk_score,
+                "warnings": immune_response.warnings,
+            }
+
+        # Use processed prompt (may have guardrails added)
+        prompt = immune_response.processed_prompt
 
         # Create Trial for evaluation
         trial = Trial(
             operation="spawn_agent",
-            input_prompt=prompt,
+            input_prompt=original_prompt,
             model=model,
             circuit_breaker_state=self._gemini_breaker._state.value,
         )
@@ -576,7 +707,7 @@ class TaskOrchestratorMCP:
 
         try:
             response = await self.coordinator.llm.generate(
-                prompt,
+                prompt,  # Use processed prompt with guardrails
                 model=model,
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
@@ -592,7 +723,7 @@ class TaskOrchestratorMCP:
                 NonEmptyGrader(),
                 LengthGrader(min_length=10, max_length=100000),
             ])
-            grader_results = await pipeline.run(response.content, {"prompt": prompt})
+            grader_results = await pipeline.run(response.content, {"prompt": original_prompt})
 
             for result in grader_results:
                 trial.add_grader_result(result)
@@ -610,6 +741,19 @@ class TaskOrchestratorMCP:
             except Exception:
                 pass  # Don't fail the request if export buffering fails
 
+            # Immune System: Record failure if evaluation failed
+            if not trial.pass_fail:
+                try:
+                    await immune.record_failure(
+                        operation="spawn_agent",
+                        prompt=original_prompt,
+                        output=response.content,
+                        grader_results=[r.to_dict() for r in trial.grader_results],
+                        context={"model": model, "cost_usd": trial.cost_usd},
+                    )
+                except Exception:
+                    pass  # Don't fail the request if immune recording fails
+
             # Record success
             self._gemini_breaker.record_success()
 
@@ -622,6 +766,11 @@ class TaskOrchestratorMCP:
                     "passed": trial.pass_fail,
                     "scores": [r.to_dict() for r in trial.grader_results],
                 },
+                "immune": {
+                    "risk_score": immune_response.risk_score,
+                    "guardrails_applied": immune_response.guardrails_applied,
+                    "prompt_modified": immune_response.original_prompt != immune_response.processed_prompt,
+                },
             }
         except Exception as e:
             self._gemini_breaker.record_failure(e)
@@ -633,7 +782,7 @@ class TaskOrchestratorMCP:
         import time
         from ..evaluation import (
             Trial, GraderPipeline, NonEmptyGrader, LengthGrader,
-            score_trial, get_exporter
+            score_trial, get_exporter, get_immune_system
         )
 
         # Check circuit breaker
@@ -658,11 +807,31 @@ class TaskOrchestratorMCP:
         system_prompt = args.get("system_prompt", "You are an expert code assistant. Provide clear, working code solutions.")
         max_tokens = args.get("max_tokens", 8192)
 
-        async def run_single_agent(prompt: str, agent_id: int) -> dict:
+        # Get immune system instance for all agents
+        immune = get_immune_system()
+
+        async def run_single_agent(original_prompt: str, agent_id: int) -> dict:
+            # Immune System: Pre-spawn check
+            immune_response = await immune.pre_spawn_check(original_prompt, "spawn_parallel_agent")
+
+            # Check if immune system blocked this agent
+            if not immune_response.should_proceed:
+                return {
+                    "agent_id": agent_id,
+                    "success": False,
+                    "immune_blocked": True,
+                    "risk_score": immune_response.risk_score,
+                    "warnings": immune_response.warnings,
+                    "evaluation": {"passed": False, "scores": []},
+                }
+
+            # Use processed prompt (may have guardrails added)
+            prompt = immune_response.processed_prompt
+
             # Create Trial for this agent
             trial = Trial(
                 operation="spawn_parallel_agent",
-                input_prompt=prompt,
+                input_prompt=original_prompt,
                 model=model,
                 circuit_breaker_state=self._gemini_breaker._state.value,
             )
@@ -672,7 +841,7 @@ class TaskOrchestratorMCP:
 
             try:
                 response = await self.coordinator.llm.generate(
-                    prompt,
+                    prompt,  # Use processed prompt with guardrails
                     model=model,
                     system_prompt=system_prompt,
                     max_tokens=max_tokens,
@@ -688,7 +857,7 @@ class TaskOrchestratorMCP:
                     NonEmptyGrader(),
                     LengthGrader(min_length=10, max_length=100000),
                 ])
-                grader_results = await pipeline.run(response.content, {"prompt": prompt})
+                grader_results = await pipeline.run(response.content, {"prompt": original_prompt})
 
                 for result in grader_results:
                     trial.add_grader_result(result)
@@ -706,6 +875,19 @@ class TaskOrchestratorMCP:
                 except Exception:
                     pass
 
+                # Immune System: Record failure if evaluation failed
+                if not trial.pass_fail:
+                    try:
+                        await immune.record_failure(
+                            operation="spawn_parallel_agent",
+                            prompt=original_prompt,
+                            output=response.content,
+                            grader_results=[r.to_dict() for r in trial.grader_results],
+                            context={"model": model, "agent_id": agent_id},
+                        )
+                    except Exception:
+                        pass
+
                 return {
                     "agent_id": agent_id,
                     "success": True,
@@ -715,6 +897,11 @@ class TaskOrchestratorMCP:
                     "evaluation": {
                         "passed": trial.pass_fail,
                         "scores": [r.to_dict() for r in trial.grader_results],
+                    },
+                    "immune": {
+                        "risk_score": immune_response.risk_score,
+                        "guardrails_applied": immune_response.guardrails_applied,
+                        "prompt_modified": immune_response.original_prompt != immune_response.processed_prompt,
                     },
                 }
             except Exception as e:
