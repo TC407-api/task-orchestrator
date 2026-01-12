@@ -11,6 +11,7 @@ Components:
 - Graders: Various code-based validators (JSON, regex, length, etc.)
 - Integration: Langfuse Scores API wrapper
 - Export: Training data exporter
+- Immune System: Failure pattern storage and guardrails
 """
 
 from .trial import Trial, GraderResult
@@ -27,6 +28,18 @@ from .graders import (
 )
 from .integration import score_trial, score_grader_result, create_eval_span
 from .export import TrainingDataExporter, get_exporter
+from .immune_system import (
+    ImmuneSystem,
+    ImmuneResponse,
+    get_immune_system,
+    reset_immune_system,
+    FailurePattern,
+    FailurePatternStore,
+    PatternMatcher,
+    MatchedPattern,
+    PromptGuardrails,
+    GuardrailResult,
+)
 
 __all__ = [
     # Core
@@ -49,4 +62,15 @@ __all__ = [
     # Export
     "TrainingDataExporter",
     "get_exporter",
+    # Immune System
+    "ImmuneSystem",
+    "ImmuneResponse",
+    "get_immune_system",
+    "reset_immune_system",
+    "FailurePattern",
+    "FailurePatternStore",
+    "PatternMatcher",
+    "MatchedPattern",
+    "PromptGuardrails",
+    "GuardrailResult",
 ]
