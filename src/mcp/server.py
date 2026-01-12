@@ -5,13 +5,12 @@ import sys
 from datetime import datetime
 from typing import Any, Optional
 
-from ..core.cost_tracker import CostTracker, Provider, get_cost_tracker
-from ..agents.coordinator import CoordinatorAgent, TaskStatus, TaskSource
+from ..core.cost_tracker import Provider, get_cost_tracker
+from ..agents.coordinator import CoordinatorAgent, TaskStatus
 from ..agents.email_agent import TaskPriority
-from ..observability import trace_operation, get_tracer
+from ..observability import trace_operation
 from ..self_healing import (
     CircuitBreaker,
-    CircuitBreakerOpen,
     get_healing_status,
 )
 
@@ -60,7 +59,7 @@ class TaskOrchestratorMCP:
             router = ModelRouter({"google": provider})
             self.coordinator = CoordinatorAgent(llm_router=router)
             self._initialized = True
-        except ValueError as e:
+        except ValueError:
             # API key not set - coordinator without LLM
             self.coordinator = CoordinatorAgent()
             self._initialized = True
@@ -224,6 +223,47 @@ class TaskOrchestratorMCP:
                     "properties": {},
                 },
             },
+            {
+                "name": "spawn_agent",
+                "description": "Spawn a Gemini agent to execute a code task. Returns the agent's response.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": "Task prompt for the agent"},
+                        "model": {
+                            "type": "string",
+                            "enum": ["gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-flash"],
+                            "description": "Model to use (default: gemini-3-flash-preview)",
+                        },
+                        "system_prompt": {"type": "string", "description": "Optional system prompt"},
+                        "max_tokens": {"type": "integer", "description": "Max output tokens (default: 8192)"},
+                        "working_dir": {"type": "string", "description": "Working directory context"},
+                    },
+                    "required": ["prompt"],
+                },
+            },
+            {
+                "name": "spawn_parallel_agents",
+                "description": "Spawn multiple Gemini agents in parallel to execute code tasks.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prompts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of task prompts",
+                        },
+                        "model": {
+                            "type": "string",
+                            "enum": ["gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-flash"],
+                            "description": "Model for all agents (default: gemini-3-flash-preview)",
+                        },
+                        "system_prompt": {"type": "string", "description": "Shared system prompt"},
+                        "max_tokens": {"type": "integer", "description": "Max output tokens per agent (default: 8192)"},
+                    },
+                    "required": ["prompts"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -241,6 +281,8 @@ class TaskOrchestratorMCP:
             "cost_summary": self._handle_cost_summary,
             "cost_set_budget": self._handle_cost_set_budget,
             "healing_status": self._handle_healing_status,
+            "spawn_agent": self._handle_spawn_agent,
+            "spawn_parallel_agents": self._handle_spawn_parallel_agents,
         }
 
         handler = handlers.get(name)
@@ -489,6 +531,168 @@ class TaskOrchestratorMCP:
         return {
             "success": True,
             "healing_status": status,
+        }
+
+    @trace_operation("spawn_agent")
+    async def _handle_spawn_agent(self, args: dict) -> dict:
+        """Spawn a Gemini agent to execute a code task."""
+        import time
+        from ..evaluation import (
+            Trial, GraderPipeline, NonEmptyGrader, LengthGrader,
+            score_trial, get_exporter
+        )
+
+        # Check circuit breaker
+        can_proceed, retry_after = self._gemini_breaker.is_available()
+        if not can_proceed:
+            return {
+                "error": f"Gemini service circuit breaker is open. Retry after {retry_after:.1f}s",
+                "circuit_breaker_open": True,
+                "retry_after_seconds": retry_after,
+            }
+
+        # Check budget
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
+        if not can_proceed:
+            return {"error": msg, "budget_exceeded": True}
+
+        if not self.coordinator.llm:
+            return {"error": "LLM not configured. Set GOOGLE_API_KEY in .env"}
+
+        model = args.get("model", "gemini-3-flash-preview")
+        prompt = args["prompt"]
+        system_prompt = args.get("system_prompt", "You are an expert code assistant. Provide clear, working code solutions.")
+        max_tokens = args.get("max_tokens", 8192)
+
+        # Create Trial for evaluation
+        trial = Trial(
+            operation="spawn_agent",
+            input_prompt=prompt,
+            model=model,
+            circuit_breaker_state=self._gemini_breaker._state.value,
+        )
+
+        start_time = time.time()
+
+        try:
+            response = await self.coordinator.llm.generate(
+                prompt,
+                model=model,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+            )
+
+            # Record timing and output
+            trial.latency_ms = (time.time() - start_time) * 1000
+            trial.output = response.content
+            trial.cost_usd = response.usage.get("estimated_cost_usd", 0) if response.usage else 0
+
+            # Run evaluation pipeline (non-blocking)
+            pipeline = GraderPipeline([
+                NonEmptyGrader(),
+                LengthGrader(min_length=10, max_length=100000),
+            ])
+            grader_results = await pipeline.run(response.content, {"prompt": prompt})
+
+            for result in grader_results:
+                trial.add_grader_result(result)
+
+            # Push scores to Langfuse (async, non-blocking)
+            try:
+                await score_trial(trial)
+            except Exception:
+                pass  # Don't fail the request if scoring fails
+
+            # Add to training data export buffer
+            try:
+                exporter = get_exporter()
+                exporter.add_trial(trial)
+            except Exception:
+                pass  # Don't fail the request if export buffering fails
+
+            # Record success
+            self._gemini_breaker.record_success()
+
+            return {
+                "success": True,
+                "response": response.content,
+                "model": response.model,
+                "usage": response.usage,
+                "evaluation": {
+                    "passed": trial.pass_fail,
+                    "scores": [r.to_dict() for r in trial.grader_results],
+                },
+            }
+        except Exception as e:
+            self._gemini_breaker.record_failure(e)
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("spawn_parallel_agents")
+    async def _handle_spawn_parallel_agents(self, args: dict) -> dict:
+        """Spawn multiple Gemini agents in parallel."""
+        # Check circuit breaker
+        can_proceed, retry_after = self._gemini_breaker.is_available()
+        if not can_proceed:
+            return {
+                "error": f"Gemini service circuit breaker is open. Retry after {retry_after:.1f}s",
+                "circuit_breaker_open": True,
+                "retry_after_seconds": retry_after,
+            }
+
+        # Check budget
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
+        if not can_proceed:
+            return {"error": msg, "budget_exceeded": True}
+
+        if not self.coordinator.llm:
+            return {"error": "LLM not configured. Set GOOGLE_API_KEY in .env"}
+
+        prompts = args["prompts"]
+        model = args.get("model", "gemini-3-flash-preview")
+        system_prompt = args.get("system_prompt", "You are an expert code assistant. Provide clear, working code solutions.")
+        max_tokens = args.get("max_tokens", 8192)
+
+        async def run_single_agent(prompt: str, agent_id: int) -> dict:
+            try:
+                response = await self.coordinator.llm.generate(
+                    prompt,
+                    model=model,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                )
+                return {
+                    "agent_id": agent_id,
+                    "success": True,
+                    "response": response.content,
+                    "model": response.model,
+                    "usage": response.usage,
+                }
+            except Exception as e:
+                return {
+                    "agent_id": agent_id,
+                    "success": False,
+                    "error": str(e),
+                }
+
+        # Run all agents in parallel
+        tasks = [run_single_agent(prompt, i) for i, prompt in enumerate(prompts)]
+        results = await asyncio.gather(*tasks)
+
+        # Count successes/failures
+        successes = sum(1 for r in results if r.get("success"))
+        failures = len(results) - successes
+
+        if successes > 0:
+            self._gemini_breaker.record_success()
+        if failures > 0:
+            self._gemini_breaker.record_failure(Exception(f"{failures} agents failed"))
+
+        return {
+            "success": failures == 0,
+            "total_agents": len(prompts),
+            "succeeded": successes,
+            "failed": failures,
+            "results": results,
         }
 
 
