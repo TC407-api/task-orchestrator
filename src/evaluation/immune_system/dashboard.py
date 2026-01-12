@@ -77,7 +77,7 @@ class ImmuneDashboard:
             Dict containing system health, total patterns, risk rates, etc.
         """
         health = self.system.get_health()
-        stats = self.system.get_stats()
+        self.system.get_stats()
 
         return {
             "status": health.get("status", "unknown"),

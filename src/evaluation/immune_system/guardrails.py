@@ -7,7 +7,7 @@ similar failures from occurring.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .pattern_matcher import MatchedPattern, PatternMatcher
 

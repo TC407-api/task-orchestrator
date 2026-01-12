@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from ..trial import Trial, GraderResult
+from ..trial import Trial
 from ..graders.base import Grader, GraderPipeline
 from ..graders.code import (
     NonEmptyGrader,
@@ -18,7 +18,6 @@ from ..graders.code import (
     JSONSchemaGrader,
     RegexGrader,
     LengthGrader,
-    ContainsGrader,
 )
 
 logger = logging.getLogger(__name__)

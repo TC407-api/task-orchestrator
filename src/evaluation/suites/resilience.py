@@ -10,8 +10,8 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any, Dict, List
+from unittest.mock import AsyncMock, MagicMock
 
 from ...self_healing import CircuitBreaker, CircuitState, CircuitBreakerConfig
 from ...core.cost_tracker import CostTracker, Provider

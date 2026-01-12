@@ -14,8 +14,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 from .failure_store import FailurePattern, FailurePatternStore
-from .pattern_matcher import MatchedPattern, PatternMatcher
-from .guardrails import GuardrailResult, PromptGuardrails
+from .pattern_matcher import PatternMatcher
+from .guardrails import PromptGuardrails
 
 logger = logging.getLogger(__name__)
 

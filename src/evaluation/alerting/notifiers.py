@@ -6,7 +6,7 @@ Notifiers are responsible for delivering alerts to various destinations.
 
 import abc
 import logging
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from .alerts import Alert
 

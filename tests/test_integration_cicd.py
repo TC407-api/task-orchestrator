@@ -12,9 +12,6 @@ Run with:
 import json
 import os
 import tempfile
-from datetime import datetime
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -58,7 +55,7 @@ class TestSpawnAgentWithEvaluation:
         )
 
         # Setup
-        immune = get_immune_system()
+        get_immune_system()
         pipeline = GraderPipeline([
             NonEmptyGrader(),
             LengthGrader(min_length=5, max_length=5000),

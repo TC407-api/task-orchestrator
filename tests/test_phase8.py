@@ -11,12 +11,9 @@ Run with:
     JWT_SECRET_KEY=test123 python -m pytest tests/test_phase8.py -v
 """
 
-import json
 import os
 import pytest
 from datetime import datetime, timedelta
-from typing import Dict, Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
 pytestmark = pytest.mark.integration
 
@@ -70,7 +67,7 @@ class TestLangfuseIntegration:
         if "LANGFUSE_SECRET_KEY" in os.environ:
             del os.environ["LANGFUSE_SECRET_KEY"]
 
-        tracer = EvaluationTracer()
+        EvaluationTracer()
         # Should not be enabled without credentials
         # (May still be enabled if langfuse package handles this differently)
 
@@ -461,7 +458,6 @@ class TestPhase8Integration:
     async def test_alerting_with_immune_system(self):
         """Verify alerting integrates with immune system flow."""
         from src.evaluation import get_immune_system, reset_immune_system
-        from src.evaluation.alerting import AlertManager, HighRiskThreshold
 
         reset_immune_system()
         immune = get_immune_system()
@@ -482,22 +478,9 @@ class TestPhase8Integration:
         from src.evaluation import (
             # Phase 8.1
             EvaluationTracer,
-            get_tracer,
-            trace_trial,
-            calculate_gemini_cost,
-            # Phase 8.2
-            Alert,
-            AlertSeverity,
             AlertManager,
-            HighRiskThreshold,
-            ConsoleNotifier,
-            # Phase 8.3
             PatternFederation,
-            PatternVisibility,
-            # Phase 8.4
-            FeatureExtractor,
             FailurePredictor,
-            ModelTrainer,
         )
 
         # Just verify imports work

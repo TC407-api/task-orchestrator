@@ -13,8 +13,7 @@ Covers:
 import pytest
 import json
 import tempfile
-from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch
 from typing import Dict, Any
 
 # Import evaluation modules

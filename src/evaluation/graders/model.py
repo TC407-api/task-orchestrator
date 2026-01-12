@@ -193,7 +193,7 @@ Respond ONLY with the JSON. No other text."""
                 name=self.name,
                 passed=False,
                 score=0.0,
-                message=f"Evaluation failed: Invalid JSON from grader model",
+                message="Evaluation failed: Invalid JSON from grader model",
             )
         except asyncio.TimeoutError:
             return GraderResult(

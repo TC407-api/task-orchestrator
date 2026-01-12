@@ -330,6 +330,49 @@ class TaskOrchestratorMCP:
                     "properties": {},
                 },
             },
+            {
+                "name": "alert_list",
+                "description": "List recent alerts from the alerting system. Shows high-risk patterns, frequency spikes, and consecutive failures.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum alerts to return (default: 10)",
+                            "default": 10,
+                        },
+                        "severity": {
+                            "type": "string",
+                            "enum": ["info", "warning", "critical"],
+                            "description": "Filter by severity level (optional)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "alert_clear",
+                "description": "Clear all active alerts from the alerting system.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+            {
+                "name": "predict_risk",
+                "description": "Use ML model to predict failure risk for a prompt before execution.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": "The prompt to analyze"},
+                        "tool": {
+                            "type": "string",
+                            "description": "Tool being used (spawn_agent, spawn_parallel_agents)",
+                            "default": "spawn_agent",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -354,6 +397,9 @@ class TaskOrchestratorMCP:
             "immune_failures": self._handle_immune_failures,
             "immune_dashboard": self._handle_immune_dashboard,
             "immune_sync": self._handle_immune_sync,
+            "alert_list": self._handle_alert_list,
+            "alert_clear": self._handle_alert_clear,
+            "predict_risk": self._handle_predict_risk,
         }
 
         handler = handlers.get(name)
@@ -718,6 +764,63 @@ class TaskOrchestratorMCP:
                 "success": False,
                 "error": str(e),
             }
+
+    @trace_operation("alert_list")
+    async def _handle_alert_list(self, args: dict) -> dict:
+        """List recent alerts from the alerting system."""
+        from ..evaluation import AlertManager, HighRiskThreshold, NewPatternDetected
+
+        # Get or create alert manager (singleton pattern)
+        if not hasattr(self, '_alert_manager'):
+            self._alert_manager = AlertManager(
+                rules=[HighRiskThreshold(), NewPatternDetected()]
+            )
+
+        limit = args.get("limit", 10)
+        severity = args.get("severity")
+
+        if severity:
+            alerts = self._alert_manager.get_active_alerts(severity=severity)
+        else:
+            alerts = self._alert_manager.get_recent_alerts(limit=limit)
+
+        return {
+            "success": True,
+            "alerts": alerts,
+            "stats": self._alert_manager.get_stats(),
+        }
+
+    @trace_operation("alert_clear")
+    async def _handle_alert_clear(self, args: dict) -> dict:
+        """Clear all active alerts."""
+        if not hasattr(self, '_alert_manager'):
+            return {"success": True, "cleared": 0}
+
+        cleared = self._alert_manager.clear_active_alerts()
+        return {
+            "success": True,
+            "cleared": cleared,
+        }
+
+    @trace_operation("predict_risk")
+    async def _handle_predict_risk(self, args: dict) -> dict:
+        """Predict failure risk for a prompt using ML model."""
+        from ..evaluation import FailurePredictor
+
+        prompt = args["prompt"]
+        tool = args.get("tool", "spawn_agent")
+
+        # Get or create predictor (singleton pattern)
+        if not hasattr(self, '_predictor'):
+            self._predictor = FailurePredictor()
+
+        result = self._predictor.predict(prompt, tool)
+
+        return {
+            "success": True,
+            "prediction": result.to_dict(),
+            "model_active": self._predictor.is_active,
+        }
 
     @trace_operation("spawn_agent")
     async def _handle_spawn_agent(self, args: dict) -> dict:

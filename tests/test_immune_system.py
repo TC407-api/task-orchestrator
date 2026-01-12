@@ -3,8 +3,6 @@ Tests for the Graphiti Immune System.
 """
 
 import pytest
-import asyncio
-from datetime import datetime
 
 from src.evaluation.immune_system import (
     ImmuneSystem,
@@ -14,9 +12,7 @@ from src.evaluation.immune_system import (
     FailurePattern,
     FailurePatternStore,
     PatternMatcher,
-    MatchedPattern,
     PromptGuardrails,
-    GuardrailResult,
     GUARDRAIL_TEMPLATES,
 )
 
@@ -322,7 +318,7 @@ class TestImmuneSystem:
         )
 
         assert isinstance(response, ImmuneResponse)
-        assert response.should_proceed == True
+        assert response.should_proceed
         assert response.risk_score == 0.0
 
     @pytest.mark.asyncio
@@ -392,7 +388,7 @@ class TestImmuneSystem:
 
         # If risk is high enough, should be blocked
         if response.risk_score >= 0.8:
-            assert response.should_proceed == False
+            assert not response.should_proceed
 
 
 class TestGlobalImmuneSystem:
@@ -437,7 +433,7 @@ class TestImmuneSystemIntegration:
             prompt="Generate analysis",
             operation="spawn_agent",
         )
-        assert response1.should_proceed == True
+        assert response1.should_proceed
 
         # 2. Record some failures
         await immune.record_failure(
@@ -455,7 +451,7 @@ class TestImmuneSystemIntegration:
         )
 
         # 3. Check similar prompt - should have higher risk
-        response2 = await immune.pre_spawn_check(
+        await immune.pre_spawn_check(
             prompt="Generate analysis output",
             operation="spawn_agent",
         )
@@ -487,4 +483,4 @@ class TestImmuneSystemIntegration:
 
         # Different operations should have less cross-contamination
         # (actual behavior depends on matcher implementation)
-        assert response.should_proceed == True
+        assert response.should_proceed

@@ -7,7 +7,7 @@ and the assessment of those results (GraderResults).
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Dict
 from uuid import uuid4
 
 
