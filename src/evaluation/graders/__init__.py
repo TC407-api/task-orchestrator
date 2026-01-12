@@ -22,6 +22,9 @@ from .model import (
     CompletenessGrader,
     AccuracyGrader,
     FormatGrader,
+    CodeQualityGrader,
+    SafetyGrader,
+    PerformanceGrader,
 )
 
 __all__ = [
@@ -42,4 +45,8 @@ __all__ = [
     "CompletenessGrader",
     "AccuracyGrader",
     "FormatGrader",
+    # Specialized model graders (Phase 7)
+    "CodeQualityGrader",
+    "SafetyGrader",
+    "PerformanceGrader",
 ]

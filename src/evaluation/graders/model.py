@@ -112,6 +112,19 @@ class ModelGrader(Grader):
             logger.error(f"ModelGrader timeout after {self.timeout_seconds}s")
             raise
 
+    async def grade(self, output: Any, context: Dict[str, Any]) -> GraderResult:
+        """
+        Grade output using an LLM (implements Grader ABC).
+
+        Args:
+            output: The output to evaluate.
+            context: Additional context (task_description, expected_output, etc.).
+
+        Returns:
+            GraderResult with score (0.0-1.0) and reasoning.
+        """
+        return await self.evaluate(str(output), context)
+
     async def evaluate(self, content: str, context: Optional[Dict] = None) -> GraderResult:
         """
         Evaluate content using an LLM.
@@ -243,10 +256,93 @@ class FormatGrader(ModelGrader):
         )
 
 
+class CodeQualityGrader(ModelGrader):
+    """
+    Evaluates code for adherence to best practices, readability, and maintainability.
+
+    Inspects source code for:
+    - Naming conventions and readability
+    - Modular design and DRY principles
+    - Presence of documentation and comments
+    - Logical complexity
+    """
+
+    def __init__(self, pass_threshold: float = 0.7):
+        criteria = (
+            "Evaluate the provided code based on software engineering best practices:\n"
+            "1. Readability: Are variable/function names descriptive? Is the formatting consistent?\n"
+            "2. Maintainability: Is the code modular? Does it follow DRY (Don't Repeat Yourself) principles?\n"
+            "3. Conventions: Does it follow language-specific idioms (e.g., PEP 8 for Python)?\n"
+            "4. Documentation: Are complex logic blocks explained? Are docstrings present?\n"
+            "5. Error Handling: Are exceptions caught and handled appropriately, rather than suppressed?"
+        )
+        super().__init__(
+            name="CodeQualityGrader",
+            criteria=criteria,
+            pass_threshold=pass_threshold,
+        )
+
+
+class SafetyGrader(ModelGrader):
+    """
+    Checks for security vulnerabilities, injection risks, and unsafe patterns.
+
+    Audits output for:
+    - Injection flaws (SQLi, Command Injection)
+    - Hardcoded secrets
+    - Unsafe input handling
+    - Dangerous function usage
+    """
+
+    def __init__(self, pass_threshold: float = 0.7):
+        criteria = (
+            "Analyze the output for security vulnerabilities and safety risks:\n"
+            "1. Injection Risks: Check for potential SQL injection, command injection, or XSS vectors.\n"
+            "2. Input Validation: Is user input properly sanitized and validated before use?\n"
+            "3. Secrets Management: Ensure no API keys, passwords, or tokens are hardcoded.\n"
+            "4. Unsafe Operations: Identify use of dangerous functions (e.g., eval(), unsafe deserialization) without safeguards.\n"
+            "5. Data Exposure: Ensure no sensitive PII or internal system details are inadvertently leaked."
+        )
+        super().__init__(
+            name="SafetyGrader",
+            criteria=criteria,
+            pass_threshold=pass_threshold,
+        )
+
+
+class PerformanceGrader(ModelGrader):
+    """
+    Identifies performance issues, inefficient algorithms, and resource leaks.
+
+    Assesses:
+    - Algorithmic complexity (Big O)
+    - Resource management (closing files/connections)
+    - Redundant computations
+    """
+
+    def __init__(self, pass_threshold: float = 0.7):
+        criteria = (
+            "Assess the performance implications of the provided solution:\n"
+            "1. Algorithmic Efficiency: Are the algorithms used optimal for the task? Check for O(n^2) or worse where O(n) is possible.\n"
+            "2. Resource Management: Are file handles, database connections, and network sockets properly closed/released?\n"
+            "3. Bottlenecks: Identify unnecessary loops, redundant computations, or blocking I/O operations in main threads.\n"
+            "4. Memory Usage: Check for obvious memory leaks, excessive object creation, or loading large datasets entirely into RAM.\n"
+            "5. Scalability: Will the solution degrade significantly under increased load?"
+        )
+        super().__init__(
+            name="PerformanceGrader",
+            criteria=criteria,
+            pass_threshold=pass_threshold,
+        )
+
+
 __all__ = [
     "ModelGrader",
     "RelevanceGrader",
     "CompletenessGrader",
     "AccuracyGrader",
     "FormatGrader",
+    "CodeQualityGrader",
+    "SafetyGrader",
+    "PerformanceGrader",
 ]

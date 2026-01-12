@@ -48,6 +48,16 @@ from .core import (
     get_immune_system,
     reset_immune_system,
 )
+from .dashboard import (
+    ImmuneDashboard,
+    create_dashboard,
+)
+from .federation import (
+    PatternFederation,
+    PatternVisibility,
+    FederatedPattern,
+    ScoredPattern,
+)
 
 
 __all__ = [
@@ -67,4 +77,12 @@ __all__ = [
     "GuardrailResult",
     "PromptGuardrails",
     "GUARDRAIL_TEMPLATES",
+    # Dashboard (Phase 7)
+    "ImmuneDashboard",
+    "create_dashboard",
+    # Federation (Phase 8.3)
+    "PatternFederation",
+    "PatternVisibility",
+    "FederatedPattern",
+    "ScoredPattern",
 ]

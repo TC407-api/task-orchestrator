@@ -285,6 +285,30 @@ class FailurePatternStore:
             "by_operation": by_operation,
         }
 
+    def get_all_patterns(self) -> List[FailurePattern]:
+        """Get all stored failure patterns."""
+        return list(self._local_cache.values())
+
+    async def store_pattern(self, pattern: FailurePattern) -> None:
+        """
+        Store a pre-constructed failure pattern.
+
+        Used for loading patterns from Graphiti or other sources.
+
+        Args:
+            pattern: The FailurePattern to store
+        """
+        if pattern.id in self._local_cache:
+            existing = self._local_cache[pattern.id]
+            existing.occurrence_count = max(
+                existing.occurrence_count,
+                pattern.occurrence_count
+            )
+            logger.debug(f"Updated existing pattern {pattern.id}")
+        else:
+            self._local_cache[pattern.id] = pattern
+            logger.debug(f"Stored pattern {pattern.id}")
+
 
 __all__ = [
     "FailurePattern",

@@ -302,6 +302,34 @@ class TaskOrchestratorMCP:
                     },
                 },
             },
+            {
+                "name": "immune_dashboard",
+                "description": "Get a comprehensive dashboard report of the immune system including health metrics, failure trends, and top patterns.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "format": {
+                            "type": "string",
+                            "enum": ["markdown", "json"],
+                            "description": "Output format (default: markdown)",
+                            "default": "markdown",
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days for trend analysis (default: 7)",
+                            "default": 7,
+                        },
+                    },
+                },
+            },
+            {
+                "name": "immune_sync",
+                "description": "Synchronize immune system patterns with Graphiti for persistent cross-session memory.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -324,6 +352,8 @@ class TaskOrchestratorMCP:
             "immune_status": self._handle_immune_status,
             "immune_check": self._handle_immune_check,
             "immune_failures": self._handle_immune_failures,
+            "immune_dashboard": self._handle_immune_dashboard,
+            "immune_sync": self._handle_immune_sync,
         }
 
         handler = handlers.get(name)
@@ -646,6 +676,48 @@ class TaskOrchestratorMCP:
                 "recent": [p.to_dict() for p in recent],
             },
         }
+
+    @trace_operation("immune_dashboard")
+    async def _handle_immune_dashboard(self, args: dict) -> dict:
+        """Get comprehensive immune system dashboard."""
+        from ..evaluation import get_immune_system
+        from ..evaluation.immune_system import create_dashboard
+
+        format_type = args.get("format", "markdown")
+        immune = get_immune_system()
+        dashboard = create_dashboard(immune)
+
+        if format_type == "json":
+            return {
+                "success": True,
+                "format": "json",
+                "report": dashboard.format_as_json(),
+            }
+        else:
+            return {
+                "success": True,
+                "format": "markdown",
+                "report": dashboard.format_as_markdown(),
+            }
+
+    @trace_operation("immune_sync")
+    async def _handle_immune_sync(self, args: dict) -> dict:
+        """Synchronize immune system with Graphiti."""
+        from ..evaluation import get_immune_system
+
+        immune = get_immune_system()
+
+        try:
+            result = await immune.sync_with_graphiti()
+            return {
+                "success": True,
+                "sync_result": result,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
 
     @trace_operation("spawn_agent")
     async def _handle_spawn_agent(self, args: dict) -> dict:

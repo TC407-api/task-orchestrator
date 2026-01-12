@@ -3,17 +3,23 @@ Core Immune System for Task Orchestrator.
 
 This module provides the main ImmuneSystem class that coordinates
 failure storage, pattern matching, and prompt guardrails.
+
+Includes Graphiti persistence for cross-session memory (Phase 7).
 """
 
+import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Set
 
 from .failure_store import FailurePattern, FailurePatternStore
 from .pattern_matcher import MatchedPattern, PatternMatcher
 from .guardrails import GuardrailResult, PromptGuardrails
 
 logger = logging.getLogger(__name__)
+
+GRAPHITI_GROUP_ID = "project_task_orchestrator"
 
 
 @dataclass
@@ -111,16 +117,23 @@ class ImmuneSystem:
 
         self._block_high_risk = block_high_risk
         self._high_risk_threshold = high_risk_threshold
+        self._graphiti_client = graphiti_client
+        self._graphiti_available = graphiti_client is not None
+        self._synced_pattern_ids: Set[str] = set()
         self._stats = {
             "pre_spawn_checks": 0,
             "failures_recorded": 0,
             "prompts_blocked": 0,
             "guardrails_applied": 0,
+            "graphiti_syncs": 0,
+            "graphiti_loads": 0,
+            "graphiti_persists": 0,
         }
 
         logger.info(
             f"ImmuneSystem initialized (risk_threshold={risk_threshold}, "
-            f"auto_apply={auto_apply_guardrails}, block_high_risk={block_high_risk})"
+            f"auto_apply={auto_apply_guardrails}, block_high_risk={block_high_risk}, "
+            f"graphiti_available={self._graphiti_available})"
         )
 
     async def pre_spawn_check(
@@ -268,7 +281,190 @@ class ImmuneSystem:
                 self._stats["guardrails_applied"] / self._stats["pre_spawn_checks"]
                 if self._stats["pre_spawn_checks"] > 0 else 0.0
             ),
+            "graphiti_available": self._graphiti_available,
+            "graphiti_syncs": self._stats["graphiti_syncs"],
         }
+
+    # -------------------------------------------------------------------------
+    # Graphiti Persistence Methods (Phase 7)
+    # -------------------------------------------------------------------------
+
+    async def sync_with_graphiti(self) -> Dict[str, Any]:
+        """
+        Bidirectional synchronization with Graphiti.
+
+        1. Loads existing patterns from Graphiti (remote -> local)
+        2. Persists new local patterns to Graphiti (local -> remote)
+
+        Returns:
+            Dict with sync statistics
+        """
+        if not self._graphiti_available:
+            logger.debug("Graphiti sync skipped: No client available.")
+            return {"skipped": True, "reason": "no_client"}
+
+        logger.info("Starting Immune System synchronization with Graphiti...")
+        self._stats["graphiti_syncs"] += 1
+
+        results = {"loaded": 0, "persisted": 0, "errors": []}
+
+        try:
+            # 1. Load remote knowledge first
+            load_result = await self.load_from_graphiti()
+            results["loaded"] = load_result.get("loaded", 0)
+
+            # 2. Push local knowledge
+            persist_result = await self.persist_to_graphiti()
+            results["persisted"] = persist_result.get("persisted", 0)
+
+            logger.info(
+                f"Graphiti sync complete: loaded={results['loaded']}, persisted={results['persisted']}"
+            )
+        except Exception as e:
+            logger.error(f"Failed during Graphiti sync: {str(e)}", exc_info=True)
+            results["errors"].append(str(e))
+
+        return results
+
+    async def load_from_graphiti(self) -> Dict[str, Any]:
+        """
+        Load failure patterns from Graphiti storage.
+
+        Queries for episodes associated with the orchestrator group ID
+        and reconstructs FailurePattern objects.
+
+        Returns:
+            Dict with load statistics
+        """
+        if not self._graphiti_client:
+            return {"loaded": 0, "skipped": True}
+
+        self._stats["graphiti_loads"] += 1
+        loaded_count = 0
+
+        try:
+            # Search for failure pattern memories
+            result = await self._graphiti_client.search_memory_facts(
+                query="immune_failure_pattern",
+                group_ids=[GRAPHITI_GROUP_ID],
+                max_facts=100,
+            )
+
+            if not result:
+                logger.debug("Graphiti returned empty result during load.")
+                return {"loaded": 0}
+
+            # Parse results and reconstruct patterns
+            for fact in result:
+                pattern = self._deserialize_graphiti_fact(fact)
+                if pattern:
+                    # Add to local store (deduplication handled by store)
+                    await self._failure_store.store_pattern(pattern)
+                    self._synced_pattern_ids.add(pattern.id)
+                    loaded_count += 1
+
+            logger.info(f"Loaded {loaded_count} patterns from Graphiti.")
+            return {"loaded": loaded_count}
+
+        except Exception as e:
+            logger.error(f"Error loading from Graphiti: {e}")
+            return {"loaded": 0, "error": str(e)}
+
+    async def persist_to_graphiti(self) -> Dict[str, Any]:
+        """
+        Save current failure patterns to Graphiti as episodes.
+
+        Only saves patterns that haven't been marked as synced this session.
+
+        Returns:
+            Dict with persistence statistics
+        """
+        if not self._graphiti_client:
+            return {"persisted": 0, "skipped": True}
+
+        self._stats["graphiti_persists"] += 1
+
+        # Get all patterns from local store
+        all_patterns = self._failure_store.get_all_patterns()
+
+        # Filter for unsynced patterns
+        unsynced_patterns = [
+            p for p in all_patterns
+            if p.id not in self._synced_pattern_ids
+        ]
+
+        if not unsynced_patterns:
+            logger.debug("No new patterns to persist to Graphiti.")
+            return {"persisted": 0}
+
+        logger.info(f"Persisting {len(unsynced_patterns)} new patterns to Graphiti.")
+        persisted_count = 0
+
+        for pattern in unsynced_patterns:
+            try:
+                payload = self._serialize_pattern_for_graphiti(pattern)
+
+                # Add as memory to Graphiti
+                await self._graphiti_client.add_memory(
+                    name=f"failure_pattern_{pattern.id}",
+                    episode_body=json.dumps(payload),
+                    group_id=GRAPHITI_GROUP_ID,
+                    source="json",
+                    source_description="immune_failure_pattern",
+                )
+
+                self._synced_pattern_ids.add(pattern.id)
+                persisted_count += 1
+
+            except Exception as e:
+                logger.error(f"Failed to persist pattern {pattern.id} to Graphiti: {e}")
+
+        return {"persisted": persisted_count}
+
+    def _serialize_pattern_for_graphiti(self, pattern: FailurePattern) -> Dict[str, Any]:
+        """Convert a FailurePattern into a Graphiti-compatible payload."""
+        return {
+            "type": "immune_failure_pattern",
+            "pattern_id": pattern.id,
+            "operation": pattern.operation,
+            "failure_type": pattern.failure_type,
+            "input_summary": pattern.input_summary,
+            "output_summary": pattern.output_summary,
+            "grader_scores": pattern.grader_scores,
+            "occurrence_count": pattern.occurrence_count,
+            "created_at": pattern.created_at.isoformat() if pattern.created_at else None,
+            "context": pattern.context,
+        }
+
+    def _deserialize_graphiti_fact(self, fact: Any) -> Optional[FailurePattern]:
+        """Reconstruct a FailurePattern from a Graphiti fact."""
+        try:
+            # Handle different fact formats
+            if hasattr(fact, 'fact'):
+                data = json.loads(fact.fact) if isinstance(fact.fact, str) else fact.fact
+            elif isinstance(fact, dict):
+                data = fact
+            else:
+                return None
+
+            # Validate this is actually a failure pattern
+            if data.get("type") != "immune_failure_pattern":
+                return None
+
+            return FailurePattern(
+                id=data.get("pattern_id", ""),
+                operation=data.get("operation", "unknown"),
+                failure_type=data.get("failure_type", "unknown"),
+                input_summary=data.get("input_summary", ""),
+                output_summary=data.get("output_summary", ""),
+                grader_scores=data.get("grader_scores", {}),
+                occurrence_count=data.get("occurrence_count", 1),
+                created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.utcnow(),
+                context=data.get("context", {}),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to deserialize Graphiti fact: {e}")
+            return None
 
 
 # Singleton instance for global access
