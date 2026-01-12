@@ -629,7 +629,13 @@ class TaskOrchestratorMCP:
 
     @trace_operation("spawn_parallel_agents")
     async def _handle_spawn_parallel_agents(self, args: dict) -> dict:
-        """Spawn multiple Gemini agents in parallel."""
+        """Spawn multiple Gemini agents in parallel with evaluation."""
+        import time
+        from ..evaluation import (
+            Trial, GraderPipeline, NonEmptyGrader, LengthGrader,
+            score_trial, get_exporter
+        )
+
         # Check circuit breaker
         can_proceed, retry_after = self._gemini_breaker.is_available()
         if not can_proceed:
@@ -653,6 +659,17 @@ class TaskOrchestratorMCP:
         max_tokens = args.get("max_tokens", 8192)
 
         async def run_single_agent(prompt: str, agent_id: int) -> dict:
+            # Create Trial for this agent
+            trial = Trial(
+                operation="spawn_parallel_agent",
+                input_prompt=prompt,
+                model=model,
+                circuit_breaker_state=self._gemini_breaker._state.value,
+            )
+            trial.metadata = {"agent_id": agent_id, "mode": "parallel"}
+
+            start_time = time.time()
+
             try:
                 response = await self.coordinator.llm.generate(
                     prompt,
@@ -660,18 +677,53 @@ class TaskOrchestratorMCP:
                     system_prompt=system_prompt,
                     max_tokens=max_tokens,
                 )
+
+                # Record timing and output
+                trial.latency_ms = (time.time() - start_time) * 1000
+                trial.output = response.content
+                trial.cost_usd = response.usage.get("estimated_cost_usd", 0) if response.usage else 0
+
+                # Run evaluation pipeline
+                pipeline = GraderPipeline([
+                    NonEmptyGrader(),
+                    LengthGrader(min_length=10, max_length=100000),
+                ])
+                grader_results = await pipeline.run(response.content, {"prompt": prompt})
+
+                for result in grader_results:
+                    trial.add_grader_result(result)
+
+                # Push scores to Langfuse (non-blocking)
+                try:
+                    await score_trial(trial)
+                except Exception:
+                    pass
+
+                # Add to training data export buffer
+                try:
+                    exporter = get_exporter()
+                    exporter.add_trial(trial)
+                except Exception:
+                    pass
+
                 return {
                     "agent_id": agent_id,
                     "success": True,
                     "response": response.content,
                     "model": response.model,
                     "usage": response.usage,
+                    "evaluation": {
+                        "passed": trial.pass_fail,
+                        "scores": [r.to_dict() for r in trial.grader_results],
+                    },
                 }
             except Exception as e:
+                trial.latency_ms = (time.time() - start_time) * 1000
                 return {
                     "agent_id": agent_id,
                     "success": False,
                     "error": str(e),
+                    "evaluation": {"passed": False, "scores": []},
                 }
 
         # Run all agents in parallel
@@ -681,17 +733,23 @@ class TaskOrchestratorMCP:
         # Count successes/failures
         successes = sum(1 for r in results if r.get("success"))
         failures = len(results) - successes
+        eval_passed = sum(1 for r in results if r.get("evaluation", {}).get("passed", False))
 
         if successes > 0:
             self._gemini_breaker.record_success()
         if failures > 0:
             self._gemini_breaker.record_failure(Exception(f"{failures} agents failed"))
 
+        # Track semantic failures if evaluations failed
+        if eval_passed < successes:
+            self._gemini_breaker.record_semantic_failure("parallel_eval_failed")
+
         return {
             "success": failures == 0,
             "total_agents": len(prompts),
             "succeeded": successes,
             "failed": failures,
+            "evaluations_passed": eval_passed,
             "results": results,
         }
 

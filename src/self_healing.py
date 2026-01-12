@@ -41,6 +41,7 @@ class CircuitBreakerConfig:
     success_threshold: int = 2        # Successes in HALF_OPEN to close
     timeout_seconds: float = 30.0     # Time in OPEN before testing
     half_open_max_requests: int = 3   # Max concurrent requests in HALF_OPEN
+    semantic_failure_threshold: int = 5  # Semantic failures to trip circuit
 
 
 @dataclass
@@ -83,6 +84,7 @@ class CircuitBreaker:
         self._last_transition_time = time.time()
         self._half_open_requests = 0
         self._trip_count = 0
+        self._semantic_failures: dict[str, int] = {}  # Track semantic failures by type
         self._state_lock = Lock()
 
         # Ensure directory exists
@@ -110,6 +112,7 @@ class CircuitBreaker:
                     self._last_transition_time = data.get("last_transition_time", time.time())
                     self._half_open_requests = data.get("half_open_requests", 0)
                     self._trip_count = data.get("trip_count", 0)
+                    self._semantic_failures = data.get("semantic_failures", {})
         except Exception:
             pass
 
@@ -125,6 +128,7 @@ class CircuitBreaker:
                     "last_transition_time": self._last_transition_time,
                     "half_open_requests": self._half_open_requests,
                     "trip_count": self._trip_count,
+                    "semantic_failures": self._semantic_failures,
                     "updated_at": datetime.utcnow().isoformat(),
                 }, f, indent=2)
         except Exception:
@@ -196,6 +200,35 @@ class CircuitBreaker:
 
             self._save_state()
 
+    def record_semantic_failure(self, failure_type: str) -> None:
+        """
+        Record a semantic failure (bad output quality, not a crash).
+
+        Semantic failures track quality issues like hallucinations, wrong format,
+        or invalid content that don't raise exceptions but indicate poor output.
+
+        Args:
+            failure_type: Category of semantic failure (e.g., 'hallucination',
+                         'json_invalid', 'empty_response', 'eval_failed')
+        """
+        with self._state_lock:
+            # Increment count for this failure type
+            self._semantic_failures[failure_type] = self._semantic_failures.get(failure_type, 0) + 1
+            self._last_failure_time = time.time()
+
+            # Check if total semantic failures exceed threshold
+            total_semantic = sum(self._semantic_failures.values())
+            if total_semantic >= self.config.semantic_failure_threshold:
+                self._transition_to(CircuitState.OPEN)
+
+            self._save_state()
+
+    def reset_semantic_failures(self) -> None:
+        """Reset semantic failure counts (e.g., after successful recovery)."""
+        with self._state_lock:
+            self._semantic_failures = {}
+            self._save_state()
+
     def is_available(self) -> tuple[bool, Optional[float]]:
         """
         Check if the circuit breaker allows requests.
@@ -222,6 +255,8 @@ class CircuitBreaker:
                 "success_count": self._success_count,
                 "trip_count": self._trip_count,
                 "last_failure_time": self._last_failure_time,
+                "semantic_failures": self._semantic_failures.copy(),
+                "total_semantic_failures": sum(self._semantic_failures.values()),
             }
 
 
