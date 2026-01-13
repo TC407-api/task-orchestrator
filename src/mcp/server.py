@@ -8,6 +8,20 @@ from typing import Any, Optional
 from ..core.cost_tracker import Provider, get_cost_tracker
 from ..agents.coordinator import CoordinatorAgent, TaskStatus
 from ..agents.email_agent import TaskPriority
+from ..agents.archetype_registry import (
+    Archetype,
+    ArchetypeRegistry,
+    get_archetype_registry,
+)
+from ..agents.audit_workflow import AuditWorkflow
+from ..agents.inbox import (
+    UniversalInbox,
+    AgentEvent,
+    EventType,
+    PendingAction,
+    ActionRiskLevel,
+    ApprovalStatus,
+)
 from ..observability import trace_operation
 from ..self_healing import (
     CircuitBreaker,
@@ -40,6 +54,11 @@ class TaskOrchestratorMCP:
         self._gmail_breaker = CircuitBreaker.get("gmail_service")
         self._calendar_breaker = CircuitBreaker.get("calendar_service")
         self._gemini_breaker = CircuitBreaker.get("gemini_service")
+
+        # Initialize archetype-based agent components (yoink features)
+        self._archetype_registry = get_archetype_registry()
+        self._universal_inbox = UniversalInbox()
+        self._audit_workflow: Optional[AuditWorkflow] = None
 
     async def initialize(self):
         """Initialize the coordinator with agents."""
@@ -483,6 +502,142 @@ class TaskOrchestratorMCP:
                     },
                 },
             },
+            # Archetype Agent Tools (Yoinked from Anti-gravity)
+            {
+                "name": "spawn_archetype_agent",
+                "description": "Spawn an agent with a specific archetype role (architect, builder, qc, researcher). Each archetype has filtered tools and role-specific system prompts.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "archetype": {
+                            "type": "string",
+                            "enum": ["architect", "builder", "qc", "researcher"],
+                            "description": "Agent archetype role determining tools and behavior",
+                        },
+                        "prompt": {"type": "string", "description": "Task prompt for the agent"},
+                        "model": {
+                            "type": "string",
+                            "enum": ["gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-flash"],
+                            "description": "Model to use (default: gemini-3-flash-preview)",
+                        },
+                        "inject_audit": {
+                            "type": "boolean",
+                            "description": "Inject audit history into agent context (default: true)",
+                        },
+                        "max_tokens": {"type": "integer", "description": "Max output tokens (default: 8192)"},
+                    },
+                    "required": ["archetype", "prompt"],
+                },
+            },
+            {
+                "name": "inbox_status",
+                "description": "Get universal inbox status including pending approvals and recent events.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "risk_level": {
+                            "type": "string",
+                            "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                            "description": "Filter pending approvals by risk level (optional)",
+                        },
+                        "agent_name": {
+                            "type": "string",
+                            "description": "Filter by agent name (optional)",
+                        },
+                        "include_history": {
+                            "type": "boolean",
+                            "description": "Include recent event history (default: false)",
+                        },
+                        "history_limit": {
+                            "type": "integer",
+                            "description": "Max history events to return (default: 20)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "approve_action",
+                "description": "Approve or reject a pending action in the approval queue.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "action_id": {"type": "string", "description": "ID of the action to approve/reject"},
+                        "approve": {
+                            "type": "boolean",
+                            "description": "True to approve, False to reject",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Reason for rejection (required if rejecting)",
+                        },
+                        "approved_by": {
+                            "type": "string",
+                            "description": "User approving/rejecting (default: system)",
+                        },
+                    },
+                    "required": ["action_id", "approve"],
+                },
+            },
+            {
+                "name": "audit_status",
+                "description": "Get audit workflow status including decisions, errors, and patterns.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "project_root": {
+                            "type": "string",
+                            "description": "Project root to load audit.md from (default: cwd)",
+                        },
+                        "query_topic": {
+                            "type": "string",
+                            "description": "Search for decisions matching this topic (optional)",
+                        },
+                        "query_error_type": {
+                            "type": "string",
+                            "description": "Filter errors by type (runtime, logic, api, etc.)",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "audit_append",
+                "description": "Append a new entry to the audit log (decision, error, or pattern).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "entry_type": {
+                            "type": "string",
+                            "enum": ["decision", "error", "pattern"],
+                            "description": "Type of entry to append",
+                        },
+                        "title": {"type": "string", "description": "Title of the entry"},
+                        "content": {"type": "string", "description": "Main content/description"},
+                        "project_root": {
+                            "type": "string",
+                            "description": "Project root for audit.md (default: cwd)",
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Optional metadata (severity, context, etc.)",
+                        },
+                    },
+                    "required": ["entry_type", "content"],
+                },
+            },
+            {
+                "name": "archetype_info",
+                "description": "Get information about available agent archetypes and their tool permissions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "archetype": {
+                            "type": "string",
+                            "enum": ["architect", "builder", "qc", "researcher"],
+                            "description": "Get details for specific archetype (optional, returns all if not specified)",
+                        },
+                    },
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -518,6 +673,13 @@ class TaskOrchestratorMCP:
             "sync_status": self._handle_sync_status,
             "sync_trigger": self._handle_sync_trigger,
             "sync_alerts": self._handle_sync_alerts,
+            # Archetype Agent handlers (Yoinked from Anti-gravity)
+            "spawn_archetype_agent": self._handle_spawn_archetype_agent,
+            "inbox_status": self._handle_inbox_status,
+            "approve_action": self._handle_approve_action,
+            "audit_status": self._handle_audit_status,
+            "audit_append": self._handle_audit_append,
+            "archetype_info": self._handle_archetype_info,
         }
 
         handler = handlers.get(name)
@@ -1542,6 +1704,363 @@ class TaskOrchestratorMCP:
             "failed": failures,
             "evaluations_passed": eval_passed,
             "results": results,
+        }
+
+
+    # =========================================================================
+    # Archetype Agent Tools (Yoinked from Anti-gravity)
+    # =========================================================================
+
+    @trace_operation("spawn_archetype_agent")
+    async def _handle_spawn_archetype_agent(self, args: dict) -> dict:
+        """Spawn an agent with a specific archetype role."""
+        import time
+        from ..evaluation import (
+            Trial, GraderPipeline, NonEmptyGrader, LengthGrader,
+            score_trial, get_exporter, get_immune_system
+        )
+
+        # Check circuit breaker
+        can_proceed, retry_after = self._gemini_breaker.is_available()
+        if not can_proceed:
+            return {
+                "error": f"Gemini service circuit breaker is open. Retry after {retry_after:.1f}s",
+                "circuit_breaker_open": True,
+                "retry_after_seconds": retry_after,
+            }
+
+        # Check budget
+        can_proceed, msg = self.cost_tracker.check_can_proceed(Provider.GOOGLE_GEMINI)
+        if not can_proceed:
+            return {"error": msg, "budget_exceeded": True}
+
+        if not self.coordinator.llm:
+            return {"error": "LLM not configured. Set GOOGLE_API_KEY in .env"}
+
+        # Parse archetype
+        archetype_name = args.get("archetype", "builder").lower()
+        archetype = self._archetype_registry.get_archetype_by_name(archetype_name)
+        if not archetype:
+            return {
+                "error": f"Unknown archetype: {archetype_name}",
+                "valid_archetypes": ["architect", "builder", "qc", "researcher"],
+            }
+
+        model = args.get("model", "gemini-3-flash-preview")
+        original_prompt = args["prompt"]
+        max_tokens = args.get("max_tokens", 8192)
+        inject_audit = args.get("inject_audit", True)
+
+        # Get archetype-specific configuration
+        archetype_config = self._archetype_registry.get_archetype_config(archetype)
+        system_prompt = archetype_config.system_prompt
+        temperature = archetype_config.temperature
+
+        # Inject audit history if requested
+        if inject_audit:
+            if not self._audit_workflow:
+                self._audit_workflow = AuditWorkflow()
+            system_prompt = self._audit_workflow.inject_to_prompt(system_prompt)
+
+        # Immune System: Pre-spawn check
+        immune = get_immune_system()
+        immune_response = await immune.pre_spawn_check(original_prompt, "spawn_archetype_agent")
+
+        if not immune_response.should_proceed:
+            return {
+                "success": False,
+                "error": "Request blocked by Immune System due to high failure risk",
+                "immune_blocked": True,
+                "risk_score": immune_response.risk_score,
+                "warnings": immune_response.warnings,
+            }
+
+        prompt = immune_response.processed_prompt
+
+        # Publish agent start event to inbox
+        start_event = AgentEvent(
+            event_type=EventType.AGENT_START,
+            agent_name=f"{archetype_name}_agent",
+            data={
+                "archetype": archetype_name,
+                "model": model,
+                "prompt_preview": prompt[:200],
+            },
+            source="spawn_archetype_agent",
+        )
+        await self._universal_inbox.publish(start_event)
+
+        # Create Trial for evaluation
+        trial = Trial(
+            operation="spawn_archetype_agent",
+            input_prompt=original_prompt,
+            model=model,
+            circuit_breaker_state=self._gemini_breaker._state.value,
+        )
+        trial.metadata = {"archetype": archetype_name}
+
+        start_time = time.time()
+
+        try:
+            response = await self.coordinator.llm.generate(
+                prompt,
+                model=model,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            # Record timing and output
+            trial.latency_ms = (time.time() - start_time) * 1000
+            trial.output = response.content
+            trial.cost_usd = response.usage.get("estimated_cost_usd", 0) if response.usage else 0
+
+            # Run evaluation pipeline
+            pipeline = GraderPipeline([
+                NonEmptyGrader(),
+                LengthGrader(min_length=10, max_length=100000),
+            ])
+            grader_results = await pipeline.run(response.content, {"prompt": original_prompt})
+
+            for result in grader_results:
+                trial.add_grader_result(result)
+
+            # Push scores to Langfuse
+            try:
+                await score_trial(trial)
+            except Exception:
+                pass
+
+            # Add to training data export
+            try:
+                exporter = get_exporter()
+                exporter.add_trial(trial)
+            except Exception:
+                pass
+
+            # Publish agent end event
+            end_event = AgentEvent(
+                event_type=EventType.AGENT_END,
+                agent_name=f"{archetype_name}_agent",
+                data={
+                    "archetype": archetype_name,
+                    "success": True,
+                    "latency_ms": trial.latency_ms,
+                },
+                source="spawn_archetype_agent",
+            )
+            await self._universal_inbox.publish(end_event)
+
+            # Record success
+            self._gemini_breaker.record_success()
+
+            return {
+                "success": True,
+                "archetype": archetype_name,
+                "response": response.content,
+                "model": response.model,
+                "usage": response.usage,
+                "archetype_config": {
+                    "temperature": temperature,
+                    "category": archetype_config.category,
+                    "tool_count": len(archetype_config.tools),
+                    "readonly": self._archetype_registry.is_readonly(archetype),
+                },
+                "evaluation": {
+                    "passed": trial.pass_fail,
+                    "scores": [r.to_dict() for r in trial.grader_results],
+                },
+                "immune": {
+                    "risk_score": immune_response.risk_score,
+                    "guardrails_applied": immune_response.guardrails_applied,
+                },
+            }
+        except Exception as e:
+            self._gemini_breaker.record_failure(e)
+
+            # Publish error event
+            error_event = AgentEvent(
+                event_type=EventType.ERROR,
+                agent_name=f"{archetype_name}_agent",
+                data={"error": str(e), "archetype": archetype_name},
+                source="spawn_archetype_agent",
+            )
+            await self._universal_inbox.publish(error_event)
+
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("inbox_status")
+    async def _handle_inbox_status(self, args: dict) -> dict:
+        """Get universal inbox status including pending approvals."""
+        risk_level_str = args.get("risk_level")
+        agent_name = args.get("agent_name")
+        include_history = args.get("include_history", False)
+        history_limit = args.get("history_limit", 20)
+
+        # Parse risk level if provided
+        risk_level = None
+        if risk_level_str:
+            try:
+                risk_level = ActionRiskLevel(risk_level_str)
+            except ValueError:
+                pass
+
+        # Get pending approvals
+        pending = self._universal_inbox.get_pending_approvals(
+            risk_level=risk_level,
+            agent_name=agent_name,
+        )
+
+        result = {
+            "success": True,
+            "pending_approvals": [a.to_dict() for a in pending],
+            "pending_count": len(pending),
+            "by_risk_level": {
+                "LOW": len([a for a in pending if a.risk_level == ActionRiskLevel.LOW]),
+                "MEDIUM": len([a for a in pending if a.risk_level == ActionRiskLevel.MEDIUM]),
+                "HIGH": len([a for a in pending if a.risk_level == ActionRiskLevel.HIGH]),
+                "CRITICAL": len([a for a in pending if a.risk_level == ActionRiskLevel.CRITICAL]),
+            },
+        }
+
+        # Include event history if requested
+        if include_history:
+            result["event_history"] = self._universal_inbox.get_event_history(
+                agent_name=agent_name,
+                limit=history_limit,
+            )
+
+        return result
+
+    @trace_operation("approve_action")
+    async def _handle_approve_action(self, args: dict) -> dict:
+        """Approve or reject a pending action."""
+        action_id = args["action_id"]
+        should_approve = args.get("approve", True)
+        reason = args.get("reason", "")
+        approved_by = args.get("approved_by", "system")
+
+        try:
+            if should_approve:
+                action = await self._universal_inbox.approve(
+                    action_id=action_id,
+                    approved_by=approved_by,
+                )
+                return {
+                    "success": True,
+                    "action_id": action_id,
+                    "status": "approved",
+                    "approved_by": approved_by,
+                    "execution_result": action.execution_result,
+                }
+            else:
+                if not reason:
+                    return {
+                        "success": False,
+                        "error": "Reason is required when rejecting an action",
+                    }
+                action = await self._universal_inbox.reject(
+                    action_id=action_id,
+                    reason=reason,
+                    rejected_by=approved_by,
+                )
+                return {
+                    "success": True,
+                    "action_id": action_id,
+                    "status": "rejected",
+                    "rejected_by": approved_by,
+                    "reason": reason,
+                }
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("audit_status")
+    async def _handle_audit_status(self, args: dict) -> dict:
+        """Get audit workflow status."""
+        project_root = args.get("project_root")
+        query_topic = args.get("query_topic")
+        query_error_type = args.get("query_error_type")
+
+        # Initialize or re-initialize audit workflow if project root changed
+        if not self._audit_workflow or (project_root and str(self._audit_workflow.project_root) != project_root):
+            self._audit_workflow = AuditWorkflow(project_root=project_root)
+
+        result = {
+            "success": True,
+            "summary": self._audit_workflow.get_summary(),
+            "audit_file": str(self._audit_workflow.audit_file),
+            "file_exists": self._audit_workflow.audit_file.exists(),
+        }
+
+        # Add query results if requested
+        if query_topic:
+            result["topic_matches"] = self._audit_workflow.query_decisions(query_topic)
+
+        if query_error_type:
+            result["error_matches"] = self._audit_workflow.query_errors(query_error_type)
+
+        return result
+
+    @trace_operation("audit_append")
+    async def _handle_audit_append(self, args: dict) -> dict:
+        """Append a new entry to the audit log."""
+        entry_type = args["entry_type"]
+        content = args["content"]
+        title = args.get("title")
+        project_root = args.get("project_root")
+        metadata = args.get("metadata", {})
+
+        # Initialize audit workflow if needed
+        if not self._audit_workflow or (project_root and str(self._audit_workflow.project_root) != project_root):
+            self._audit_workflow = AuditWorkflow(project_root=project_root)
+
+        try:
+            self._audit_workflow.append_entry(
+                entry_type=entry_type,
+                content=content,
+                title=title,
+                metadata=metadata,
+            )
+            return {
+                "success": True,
+                "entry_type": entry_type,
+                "title": title or f"Entry {len(self._audit_workflow.audit_data.get(entry_type + 's', []))}",
+                "audit_file": str(self._audit_workflow.audit_file),
+            }
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("archetype_info")
+    async def _handle_archetype_info(self, args: dict) -> dict:
+        """Get information about agent archetypes."""
+        archetype_name = args.get("archetype")
+
+        if archetype_name:
+            archetype = self._archetype_registry.get_archetype_by_name(archetype_name)
+            if not archetype:
+                return {
+                    "success": False,
+                    "error": f"Unknown archetype: {archetype_name}",
+                    "valid_archetypes": ["architect", "builder", "qc", "researcher"],
+                }
+
+            config = self._archetype_registry.get_archetype_config(archetype)
+            return {
+                "success": True,
+                "archetype": archetype_name,
+                "description": config.description,
+                "category": config.category,
+                "temperature": config.temperature,
+                "tool_count": len(config.tools),
+                "tools": config.tools,
+                "readonly": self._archetype_registry.is_readonly(archetype),
+                "system_prompt_preview": config.system_prompt[:500] + "...",
+            }
+
+        # Return all archetypes
+        return {
+            "success": True,
+            "archetypes": self._archetype_registry.get_summary(),
         }
 
 
