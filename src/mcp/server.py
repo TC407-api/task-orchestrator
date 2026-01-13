@@ -22,6 +22,10 @@ from ..agents.inbox import (
     ActionRiskLevel,
     ApprovalStatus,
 )
+from ..agents.terminal_loop import TerminalListener, ErrorCapture, StackTraceParser
+from ..agents.shadow_validator import ShadowValidator, ValidationResult
+from ..agents.workflows import WorkflowRegistry, WorkflowTrigger
+from ..agents.background_tasks import BackgroundTaskScheduler, ScheduledTask, TaskScheduleType
 from ..observability import trace_operation
 from ..self_healing import (
     CircuitBreaker,
@@ -59,6 +63,12 @@ class TaskOrchestratorMCP:
         self._archetype_registry = get_archetype_registry()
         self._universal_inbox = UniversalInbox()
         self._audit_workflow: Optional[AuditWorkflow] = None
+
+        # Batch 2 components
+        self._terminal_listener: Optional[TerminalListener] = None
+        self._shadow_validator = ShadowValidator()
+        self._workflow_registry = WorkflowRegistry()
+        self._background_scheduler: Optional[BackgroundTaskScheduler] = None
 
     async def initialize(self):
         """Initialize the coordinator with agents."""
@@ -638,6 +648,107 @@ class TaskOrchestratorMCP:
                     },
                 },
             },
+            # Batch 2: Terminal, Validation, Workflows, Background Tasks
+            {
+                "name": "run_with_error_capture",
+                "description": "Run a command and capture any errors with stack trace analysis.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "Command to run"},
+                        "working_dir": {"type": "string", "description": "Working directory (optional)"},
+                        "timeout": {"type": "integer", "description": "Timeout in seconds (default: 60)"},
+                    },
+                    "required": ["command"],
+                },
+            },
+            {
+                "name": "validate_code",
+                "description": "Validate code syntax and style before showing to user.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string", "description": "Code to validate"},
+                        "language": {
+                            "type": "string",
+                            "enum": ["python", "javascript", "typescript", "json"],
+                            "description": "Programming language",
+                        },
+                        "run_linter": {"type": "boolean", "description": "Also run linter (default: true)"},
+                    },
+                    "required": ["code", "language"],
+                },
+            },
+            {
+                "name": "trigger_workflow",
+                "description": "Execute an @Workflow trigger (e.g., @Refactor, @TestGen, @Debug).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workflow": {
+                            "type": "string",
+                            "enum": ["refactor", "testgen", "debug", "review", "docs"],
+                            "description": "Workflow to trigger",
+                        },
+                        "prompt": {"type": "string", "description": "User prompt to process"},
+                        "target_files": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Target files for the workflow (optional)",
+                        },
+                    },
+                    "required": ["workflow", "prompt"],
+                },
+            },
+            {
+                "name": "list_workflows",
+                "description": "List available @Workflow triggers.",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "schedule_task",
+                "description": "Schedule a background task.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Task name"},
+                        "command": {"type": "string", "description": "Command to run"},
+                        "schedule_type": {
+                            "type": "string",
+                            "enum": ["one_time", "recurring", "deferred"],
+                            "description": "Schedule type",
+                        },
+                        "run_at": {"type": "string", "description": "ISO datetime for one_time tasks"},
+                        "interval_seconds": {"type": "integer", "description": "Interval for recurring tasks"},
+                    },
+                    "required": ["name", "command", "schedule_type"],
+                },
+            },
+            {
+                "name": "list_scheduled_tasks",
+                "description": "List scheduled background tasks.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "enum": ["all", "pending", "running", "completed"],
+                            "description": "Filter by status",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "cancel_scheduled_task",
+                "description": "Cancel a scheduled background task.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string", "description": "Task ID to cancel"},
+                    },
+                    "required": ["task_id"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -680,6 +791,14 @@ class TaskOrchestratorMCP:
             "audit_status": self._handle_audit_status,
             "audit_append": self._handle_audit_append,
             "archetype_info": self._handle_archetype_info,
+            # Batch 2 handlers
+            "run_with_error_capture": self._handle_run_with_error_capture,
+            "validate_code": self._handle_validate_code,
+            "trigger_workflow": self._handle_trigger_workflow,
+            "list_workflows": self._handle_list_workflows,
+            "schedule_task": self._handle_schedule_task,
+            "list_scheduled_tasks": self._handle_list_scheduled_tasks,
+            "cancel_scheduled_task": self._handle_cancel_scheduled_task,
         }
 
         handler = handlers.get(name)
@@ -2062,6 +2181,187 @@ class TaskOrchestratorMCP:
             "success": True,
             "archetypes": self._archetype_registry.get_summary(),
         }
+
+    # =========================================================================
+    # Batch 2: Terminal, Validation, Workflows, Background Tasks
+    # =========================================================================
+
+    @trace_operation("run_with_error_capture")
+    async def _handle_run_with_error_capture(self, args: dict) -> dict:
+        """Run command and capture errors with stack trace analysis."""
+        command = args["command"]
+        working_dir = args.get("working_dir")
+        timeout = args.get("timeout", 60)
+
+        # Lazy init terminal listener
+        if not self._terminal_listener:
+            self._terminal_listener = TerminalListener(inbox=self._universal_inbox)
+
+        try:
+            result = await self._terminal_listener.run_command(
+                command=command,
+                working_dir=working_dir,
+                timeout=timeout,
+            )
+
+            return {
+                "success": result.exit_code == 0,
+                "exit_code": result.exit_code,
+                "stdout": result.stdout[:5000] if result.stdout else "",
+                "stderr": result.stderr[:5000] if result.stderr else "",
+                "error_detected": result.error is not None,
+                "error": result.error.to_dict() if result.error else None,
+                "fix_proposals": [p.to_dict() for p in result.fix_proposals] if result.fix_proposals else [],
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("validate_code")
+    async def _handle_validate_code(self, args: dict) -> dict:
+        """Validate code syntax and style."""
+        code = args["code"]
+        language = args["language"]
+        run_linter = args.get("run_linter", True)
+
+        try:
+            result = await self._shadow_validator.validate(
+                code=code,
+                language=language,
+                run_linter=run_linter,
+            )
+
+            return {
+                "success": True,
+                "valid": result.valid,
+                "errors": result.errors,
+                "warnings": result.warnings,
+                "suggestions": result.suggestions,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("trigger_workflow")
+    async def _handle_trigger_workflow(self, args: dict) -> dict:
+        """Execute a workflow trigger."""
+        workflow_name = args["workflow"]
+        prompt = args["prompt"]
+        target_files = args.get("target_files", [])
+
+        try:
+            # Get workflow
+            workflow = self._workflow_registry.get_workflow(workflow_name)
+            if not workflow:
+                return {
+                    "success": False,
+                    "error": f"Unknown workflow: {workflow_name}",
+                    "available": list(self._workflow_registry.list_workflows().keys()),
+                }
+
+            # Process prompt through workflow
+            trigger = WorkflowTrigger(registry=self._workflow_registry)
+            context = await trigger.prepare_context(
+                prompt=prompt,
+                workflow=workflow,
+                target_files=target_files,
+            )
+
+            return {
+                "success": True,
+                "workflow": workflow_name,
+                "archetype": workflow.archetype,
+                "expanded_prompt": context.expanded_prompt,
+                "system_prompt_addition": context.system_prompt_addition,
+                "loaded_files": context.loaded_files,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("list_workflows")
+    async def _handle_list_workflows(self, args: dict) -> dict:
+        """List available workflows."""
+        workflows = self._workflow_registry.list_workflows()
+        return {
+            "success": True,
+            "workflows": {
+                name: {
+                    "trigger": wf.trigger,
+                    "description": wf.description,
+                    "archetype": wf.archetype,
+                }
+                for name, wf in workflows.items()
+            },
+        }
+
+    @trace_operation("schedule_task")
+    async def _handle_schedule_task(self, args: dict) -> dict:
+        """Schedule a background task."""
+        name = args["name"]
+        command = args["command"]
+        schedule_type_str = args["schedule_type"]
+        run_at = args.get("run_at")
+        interval_seconds = args.get("interval_seconds")
+
+        # Lazy init scheduler
+        if not self._background_scheduler:
+            self._background_scheduler = BackgroundTaskScheduler(
+                inbox=self._universal_inbox
+            )
+
+        try:
+            schedule_type = TaskScheduleType(schedule_type_str.upper())
+
+            # Create a command runner function
+            async def run_command():
+                import subprocess
+                result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                return {"stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
+
+            task = ScheduledTask(
+                name=name,
+                func=run_command,
+                schedule_type=schedule_type,
+                run_at=datetime.fromisoformat(run_at) if run_at else None,
+                interval_seconds=interval_seconds,
+            )
+
+            task_id = await self._background_scheduler.schedule_task(task)
+
+            return {
+                "success": True,
+                "task_id": task_id,
+                "name": name,
+                "schedule_type": schedule_type_str,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @trace_operation("list_scheduled_tasks")
+    async def _handle_list_scheduled_tasks(self, args: dict) -> dict:
+        """List scheduled tasks."""
+        if not self._background_scheduler:
+            return {"success": True, "tasks": [], "message": "No scheduler initialized"}
+
+        status_filter = args.get("status")
+        tasks = self._background_scheduler.list_tasks(status=status_filter)
+
+        return {
+            "success": True,
+            "tasks": [t.to_dict() if hasattr(t, 'to_dict') else str(t) for t in tasks],
+        }
+
+    @trace_operation("cancel_scheduled_task")
+    async def _handle_cancel_scheduled_task(self, args: dict) -> dict:
+        """Cancel a scheduled task."""
+        task_id = args["task_id"]
+
+        if not self._background_scheduler:
+            return {"success": False, "error": "No scheduler initialized"}
+
+        try:
+            await self._background_scheduler.cancel_task(task_id)
+            return {"success": True, "task_id": task_id, "status": "cancelled"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 async def run_mcp_server():

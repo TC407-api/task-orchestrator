@@ -10,6 +10,24 @@ from .archetype_registry import (
     get_archetype_registry,
     reset_registry,
 )
+from .background_tasks import (
+    BackgroundTaskScheduler,
+    ScheduledTask,
+    TaskResult,
+    TaskScheduleType,
+    TaskStatus,
+)
+from .terminal_loop import (
+    TerminalListener,
+    ErrorCapture,
+    StackTraceParser,
+    FixProposer,
+    DetectedError,
+    FixProposal,
+    StackTraceLocation,
+    ErrorLanguage,
+    ErrorSeverity,
+)
 
 __all__ = [
     "EmailAgent",
@@ -21,4 +39,18 @@ __all__ = [
     "ArchetypeConfig",
     "get_archetype_registry",
     "reset_registry",
+    "BackgroundTaskScheduler",
+    "ScheduledTask",
+    "TaskResult",
+    "TaskScheduleType",
+    "TaskStatus",
+    "TerminalListener",
+    "ErrorCapture",
+    "StackTraceParser",
+    "FixProposer",
+    "DetectedError",
+    "FixProposal",
+    "StackTraceLocation",
+    "ErrorLanguage",
+    "ErrorSeverity",
 ]

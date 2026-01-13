@@ -18,7 +18,7 @@ import functools
 import json
 import sqlite3
 from dataclasses import dataclass, asdict, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from threading import Lock
@@ -118,7 +118,7 @@ class PendingAction:
     payload: dict = field(default_factory=dict)
     status: ApprovalStatus = ApprovalStatus.PENDING
     created_at: datetime = field(default_factory=datetime.now)
-    expires_at: datetime = field(default_factory=lambda: datetime.now())
+    expires_at: datetime = field(default_factory=lambda: datetime.now() + timedelta(hours=1))
     approved_at: Optional[datetime] = None
     approved_by: Optional[str] = None
     rejection_reason: Optional[str] = None
@@ -163,11 +163,21 @@ class UniversalInbox:
         self._subscribers: list[asyncio.Queue] = []
         self._db_lock = Lock()
         self._pending_actions: dict[str, PendingAction] = {}
+        # Keep persistent connection for in-memory databases
+        self._conn: Optional[sqlite3.Connection] = None
+        if self.db_path == ":memory:":
+            self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._init_db()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Get database connection, using persistent connection for in-memory."""
+        if self._conn is not None:
+            return self._conn
+        return sqlite3.connect(self.db_path)
 
     def _init_db(self) -> None:
         """Initialize SQLite database schema."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Events table
@@ -222,7 +232,7 @@ class UniversalInbox:
         )
 
         conn.commit()
-        conn.close()
+        if self._conn is None: conn.close()
 
     async def publish(self, event: AgentEvent) -> None:
         """
@@ -244,7 +254,7 @@ class UniversalInbox:
     def _store_event(self, event: AgentEvent) -> None:
         """Store event in SQLite database."""
         with self._db_lock:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             try:
@@ -267,7 +277,7 @@ class UniversalInbox:
                 )
                 conn.commit()
             finally:
-                conn.close()
+                if self._conn is None: conn.close()
 
     async def subscribe(self) -> AsyncGenerator[AgentEvent, None]:
         """
@@ -355,7 +365,7 @@ class UniversalInbox:
     def _store_pending_action(self, action: PendingAction) -> None:
         """Store pending action in database."""
         with self._db_lock:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             try:
@@ -385,7 +395,7 @@ class UniversalInbox:
                 )
                 conn.commit()
             finally:
-                conn.close()
+                if self._conn is None: conn.close()
 
     def get_pending_approvals(
         self,
@@ -534,7 +544,7 @@ class UniversalInbox:
     def _update_action_status(self, action: PendingAction) -> None:
         """Update action status in database."""
         with self._db_lock:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             try:
@@ -556,7 +566,7 @@ class UniversalInbox:
                 )
                 conn.commit()
             finally:
-                conn.close()
+                if self._conn is None: conn.close()
 
     def get_action(self, action_id: str) -> Optional[PendingAction]:
         """Get a specific pending action by ID."""
@@ -578,7 +588,7 @@ class UniversalInbox:
             List of history records
         """
         with self._db_lock:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             try:
@@ -609,7 +619,7 @@ class UniversalInbox:
                 columns = [col[0] for col in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
             finally:
-                conn.close()
+                if self._conn is None: conn.close()
 
     def get_event_history(
         self,
@@ -629,7 +639,7 @@ class UniversalInbox:
             List of event records
         """
         with self._db_lock:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             try:
@@ -653,7 +663,7 @@ class UniversalInbox:
                 columns = [col[0] for col in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
             finally:
-                conn.close()
+                if self._conn is None: conn.close()
 
     async def clear_expired_actions(self) -> int:
         """

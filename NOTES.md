@@ -1,7 +1,7 @@
 # Session State - 2026-01-12
 
 ## Current Task
-Agent Evaluation System for task-orchestrator MCP server - **ALL PHASES COMPLETE + LIVE SYNC IMPLEMENTED**
+Agent Evaluation System for task-orchestrator MCP server - **ALL PHASES COMPLETE + LEARNINGS EXTRACTED**
 
 ## Progress
 - [x] Phase 1: Foundation (Trial, Graders, Export, Integration)
@@ -16,10 +16,21 @@ Agent Evaluation System for task-orchestrator MCP server - **ALL PHASES COMPLETE
 - [x] **Phase 9: Cross-Project Federation** (registry, decay, federation MCP tools)
 - [x] **Phase 10: Live Graphiti Sync** (sync protocol, subscriber, engine, conflict resolver, hooks, monitor)
 - [x] **Verification passed** (213 tests)
+- [x] **Learnings Extracted** (5 patterns stored in Graphiti)
 
 ## Latest Session Work (2026-01-12)
 
-### Phase 10: Live Graphiti Sync (Just Completed)
+### Learnings Extracted to Graphiti
+Ran `/learn extract` and stored 5 key patterns:
+1. **Multi-Agent Swarm Orchestration** - QUEEN-WORKER/MESH patterns, 5-6 parallel Gemini Pro agents
+2. **Self-Healing Immune System** - Risk scoring, hash dedup, 72h decay, ML prediction
+3. **Cross-Project Federation** - WebSocket sync, version vectors, conflict resolution, hooks
+4. **MCP Server Design** - 29 tools across 7 categories, lazy init, structured JSON
+5. **AI Evaluation Pipeline** - Grader chains, Gemini Flash caching, JSONL export
+
+All stored under `group_id: project_task_orchestrator` for cross-project recall.
+
+### Phase 10: Live Graphiti Sync
 Used `/flow` to spawn 6 parallel Gemini Pro agents (QUEEN-WORKER pattern) for Task 5:
 
 1. **Agent 1: Sync Protocol** - WebSocket-based protocol with heartbeats, exponential backoff
@@ -59,6 +70,7 @@ Used `/flow` to spawn 6 parallel Gemini Pro agents (QUEEN-WORKER pattern) for Ta
 - `b7d5cca` feat(evaluation): complete Phase 7+8 - production ready with advanced features
 - `653c59b` feat(mcp): add alert_list, alert_clear, predict_risk MCP tools
 - `98e01a2` feat(federation): implement cross-project pattern federation (Phase 9)
+- `784a90f` feat(live-sync): implement real-time Graphiti federation sync (Phase 10)
 
 ## MCP Tools (29 Total)
 ```
@@ -72,7 +84,7 @@ Alerting:             alert_list, alert_clear
 Prediction:           predict_risk
 Federation:           federation_status, federation_subscribe,
                       federation_search, federation_decay
-Live Sync (NEW):      sync_status, sync_trigger, sync_alerts
+Live Sync:            sync_status, sync_trigger, sync_alerts
 ```
 
 ## Test Status
@@ -88,14 +100,14 @@ Live Sync (NEW):      sync_status, sync_trigger, sync_alerts
 ### Immune System
 - `src/evaluation/immune_system/core.py` - ImmuneSystem singleton
 - `src/evaluation/immune_system/federation.py` - Cross-project sharing
-- `src/evaluation/immune_system/registry.py` - Portfolio project registry (NEW)
-- `src/evaluation/immune_system/decay.py` - Pattern relevance decay (NEW)
+- `src/evaluation/immune_system/registry.py` - Portfolio project registry
+- `src/evaluation/immune_system/decay.py` - Pattern relevance decay
 
 ### Alerting & Prediction
 - `src/evaluation/alerting/manager.py` - AlertManager
 - `src/evaluation/prediction/classifier.py` - FailurePredictor
 
-### Live Sync (NEW)
+### Live Sync
 - `src/evaluation/immune_system/live_sync/__init__.py` - Module exports
 - `src/evaluation/immune_system/live_sync/sync_protocol.py` - WebSocket protocol
 - `src/evaluation/immune_system/live_sync/pattern_subscriber.py` - Event subscriber
@@ -116,7 +128,7 @@ Immune System:
   pre_spawn_check(prompt) -> ImmuneResponse (risk_score, guardrails)
   record_failure() -> FailurePattern -> PatternMatcher -> Graphiti
 
-Federation (NEW):
+Federation:
   RegistryManager -> [task-orchestrator, construction-connect, ...]
   PatternFederation -> subscribe -> search_global_patterns -> import_pattern
   PatternDecaySystem -> S(t) = S_last * 2^(-Δt/h) + W_outcome
@@ -128,7 +140,7 @@ Alerting:
 Prediction:
   FailurePredictor -> FeatureExtractor (TF-IDF + meta) -> RandomForest
 
-Live Sync (NEW):
+Live Sync:
   PatternSyncClient -> WebSocket -> SyncMessage (heartbeat, pattern_created/updated/deleted)
   PatternSubscriber -> event queue -> callbacks -> PatternEvent
   SyncEngine -> push_batch/pull_batch -> PeerSyncState tracking
@@ -150,32 +162,28 @@ MCP Integration:
 - Pattern decay: 72-hour half-life, 14-day staleness threshold
 - Hybrid registry: static namespaces.json + dynamic Graphiti discovery
 
-## Multi-Agent Swarm Used
-MESH pattern with 5 Gemini Pro agents:
-```
-        [Task: Federation]
-              |
-    +---------+---------+
-    |    |    |    |    |
-  [A1] [A2] [A3] [A4] [A5]
-Registry Tools Sync Decay Hooks
-    |    |    |    |    |
-    +---------+---------+
-              |
-      [Synthesizer: Claude]
-```
+## Graphiti Learnings Stored
+Query with `/recall` using these group_ids:
+- `project_task_orchestrator` - All patterns from this project
+- Pattern names:
+  - `learning-task-orchestrator-multi-agent-swarm-20260112`
+  - `learning-task-orchestrator-immune-system-20260112`
+  - `learning-task-orchestrator-federation-sync-20260112`
+  - `learning-task-orchestrator-mcp-server-design-20260112`
+  - `learning-task-orchestrator-evaluation-pipeline-20260112`
 
 ## Next Steps (Optional)
 1. Train ML predictor with production JSONL data
 2. Fine-tune model graders based on collected evaluations
 3. Create admin web dashboard for monitoring
 4. Add more alert notifiers (email, PagerDuty)
-5. Connect Graphiti for live federation sync
-6. Add pattern import/export between projects
+5. Add pattern import/export between projects
+6. Apply learnings to other portfolio projects
 
 ## Context to Preserve
 - GitHub repo: https://github.com/TC407-api/task-orchestrator
-- All 8 phases + Federation (Phase 9) complete
-- 170 tests, verification passed
-- 26 MCP tools available
+- All 10 phases complete + learnings extracted
+- 213 tests passing, verification passed
+- 29 MCP tools available
+- Commit `784a90f` pushed to origin
 - Ready for production deployment
