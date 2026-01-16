@@ -34,6 +34,7 @@ from ..self_healing import (
 from .tool_router import ToolRouter, ToolCategory, TOOL_CATEGORIES
 from .context_tracker import ContextTracker
 from .content_tools import CONTENT_TOOLS, ContentToolsHandler
+from .research_tools import RESEARCH_TOOLS, ResearchToolHandler
 
 
 class TaskOrchestratorMCP:
@@ -84,6 +85,9 @@ class TaskOrchestratorMCP:
 
         # Content automation components (Phase 11)
         self._content_tools_handler: Optional[ContentToolsHandler] = None
+
+        # Research automation components (Phase 12)
+        self._research_tools_handler: Optional[ResearchToolHandler] = None
 
     async def _get_federation(self):
         """
@@ -152,6 +156,21 @@ class TaskOrchestratorMCP:
                 inbox=self._universal_inbox,
             )
         return self._content_tools_handler
+
+    async def _get_research_tools_handler(self) -> ResearchToolHandler:
+        """Get or create the ResearchToolHandler."""
+        if self._research_tools_handler is None:
+            # Ensure background scheduler is initialized
+            if self._background_scheduler is None:
+                self._background_scheduler = BackgroundTaskScheduler(
+                    inbox=self._universal_inbox
+                )
+                await self._background_scheduler.start()
+
+            self._research_tools_handler = ResearchToolHandler(
+                background_scheduler=self._background_scheduler,
+            )
+        return self._research_tools_handler
 
     def get_tools(self) -> list[dict]:
         """Return MCP tool definitions."""
@@ -829,7 +848,7 @@ class TaskOrchestratorMCP:
                     "required": ["category"],
                 },
             },
-        ] + CONTENT_TOOLS  # Content automation tools (Phase 11)
+        ] + CONTENT_TOOLS + RESEARCH_TOOLS  # Content + Research automation tools (Phase 11-12)
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
         """Handle an MCP tool call."""
@@ -900,6 +919,26 @@ class TaskOrchestratorMCP:
                 content_handler = await self._get_content_tools_handler()
                 handler_method = getattr(content_handler, content_handlers[name].replace("_handle_", "handle_"))
                 return await handler_method(arguments)
+            except Exception as e:
+                return {"error": str(e)}
+
+        # Research automation handlers (Phase 12)
+        research_tool_names = [
+            "research_run",
+            "research_add_topic",
+            "research_remove_topic",
+            "research_list_topics",
+            "research_get_context",
+            "research_schedule",
+            "research_status",
+            "research_search_past",
+        ]
+
+        # Check if it's a research tool
+        if name in research_tool_names:
+            try:
+                research_handler = await self._get_research_tools_handler()
+                return await research_handler.handle_tool(name, arguments)
             except Exception as e:
                 return {"error": str(e)}
 
