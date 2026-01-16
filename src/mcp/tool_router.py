@@ -16,6 +16,7 @@ class ToolCategory(str, Enum):
     SYNC = "sync"           # Sync tools: sync_status, sync_trigger, sync_alerts
     WORKFLOW = "workflow"   # Workflow tools: trigger_workflow, list_workflows, validate_code
     COST = "cost"           # Cost tools: cost_summary, cost_set_budget
+    LEARNING = "learning"   # Learning tools: learning_workflow
 
 
 # Core tools always available (5 tools + request_tool = 6 tools max)
@@ -79,6 +80,9 @@ TOOL_CATEGORIES: Dict[ToolCategory, List[str]] = {
     ToolCategory.COST: [
         "cost_summary",
         "cost_set_budget",
+    ],
+    ToolCategory.LEARNING: [
+        "learning_workflow",
     ],
 }
 

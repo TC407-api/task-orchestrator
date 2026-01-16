@@ -35,6 +35,7 @@ from .tool_router import ToolRouter, ToolCategory, TOOL_CATEGORIES
 from .context_tracker import ContextTracker
 from .content_tools import CONTENT_TOOLS, ContentToolsHandler
 from .research_tools import RESEARCH_TOOLS, ResearchToolHandler
+from .learning_tools import LEARNING_TOOLS, LearningToolHandler
 
 
 class TaskOrchestratorMCP:
@@ -88,6 +89,9 @@ class TaskOrchestratorMCP:
 
         # Research automation components (Phase 12)
         self._research_tools_handler: Optional[ResearchToolHandler] = None
+
+        # Learning automation components (Phase 13)
+        self._learning_tools_handler: Optional[LearningToolHandler] = None
 
     async def _get_federation(self):
         """
@@ -171,6 +175,12 @@ class TaskOrchestratorMCP:
                 background_scheduler=self._background_scheduler,
             )
         return self._research_tools_handler
+
+    def _get_learning_tools_handler(self) -> LearningToolHandler:
+        """Get or create the LearningToolHandler."""
+        if self._learning_tools_handler is None:
+            self._learning_tools_handler = LearningToolHandler(server=self)
+        return self._learning_tools_handler
 
     def get_tools(self) -> list[dict]:
         """Return MCP tool definitions."""
@@ -848,7 +858,7 @@ class TaskOrchestratorMCP:
                     "required": ["category"],
                 },
             },
-        ] + CONTENT_TOOLS + RESEARCH_TOOLS  # Content + Research automation tools (Phase 11-12)
+        ] + CONTENT_TOOLS + RESEARCH_TOOLS + LEARNING_TOOLS  # Content + Research + Learning automation tools (Phase 11-13)
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
         """Handle an MCP tool call."""
@@ -939,6 +949,14 @@ class TaskOrchestratorMCP:
             try:
                 research_handler = await self._get_research_tools_handler()
                 return await research_handler.handle_tool(name, arguments)
+            except Exception as e:
+                return {"error": str(e)}
+
+        # Learning automation handler (Phase 13)
+        if name == "learning_workflow":
+            try:
+                learning_handler = self._get_learning_tools_handler()
+                return await learning_handler.handle_tool(name, arguments)
             except Exception as e:
                 return {"error": str(e)}
 

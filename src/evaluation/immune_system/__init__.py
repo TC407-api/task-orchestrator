@@ -75,6 +75,10 @@ from .decay import (
     DEFAULT_HALF_LIFE_HOURS,
     STALENESS_THRESHOLD_DAYS,
 )
+from .graphiti_client import (
+    GraphitiClient,
+    create_graphiti_client,
+)
 
 
 __all__ = [
@@ -117,4 +121,7 @@ __all__ = [
     "reset_decay_system",
     "DEFAULT_HALF_LIFE_HOURS",
     "STALENESS_THRESHOLD_DAYS",
+    # Graphiti Client (Phase 13)
+    "GraphitiClient",
+    "create_graphiti_client",
 ]
