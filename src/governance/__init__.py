@@ -11,6 +11,8 @@ Modules:
 - session_context: Persistent session state
 - cost_dashboard: Enterprise cost dashboard
 - budget_allocator: Department budget management
+- agent_identity: Non-Human Identity (NHI) lifecycle management
+- session_risk_scoring: Continuous session integrity validation
 """
 
 __version__ = "0.1.0"
@@ -53,6 +55,20 @@ from src.governance.budget_allocator import (
     ChargebackReport,
 )
 
+# Agent Identity (NHI)
+from src.governance.agent_identity import (
+    AgentCredential,
+    AgentIdentityManager,
+    ArchetypeType,
+)
+
+# Session Risk Scoring
+from src.governance.session_risk_scoring import (
+    SessionRiskScore,
+    SessionRiskScorer,
+    RiskFactor,
+)
+
 __all__ = [
     # Audit
     "AuditEntry",
@@ -87,4 +103,12 @@ __all__ = [
     "BudgetCheckResult",
     "Department",
     "ChargebackReport",
+    # Agent Identity (NHI)
+    "AgentCredential",
+    "AgentIdentityManager",
+    "ArchetypeType",
+    # Session Risk Scoring
+    "SessionRiskScore",
+    "SessionRiskScorer",
+    "RiskFactor",
 ]

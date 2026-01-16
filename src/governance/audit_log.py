@@ -9,7 +9,10 @@ from typing import Optional, List, Dict, Any
 
 @dataclass(frozen=True)
 class AuditEntry:
-    """Single audit log entry with cryptographic linking."""
+    """Single audit log entry with cryptographic linking.
+
+    Enhanced with NHI binding for cryptographic agent verification.
+    """
     id: str
     timestamp: datetime
     operation: str
@@ -19,6 +22,9 @@ class AuditEntry:
     cost_usd: float
     trace_id: Optional[str] = None
     prev_hash: Optional[str] = None
+    # NHI binding for cryptographic agent verification
+    agent_credential_id: Optional[str] = None
+    agent_signature: Optional[str] = None  # Base64-encoded signature
 
 
 class ImmutableAuditLog:
@@ -74,6 +80,8 @@ class ImmutableAuditLog:
             "cost_usd": entry.cost_usd,
             "trace_id": entry.trace_id,
             "prev_hash": entry.prev_hash,
+            "agent_credential_id": entry.agent_credential_id,
+            "agent_signature": entry.agent_signature,
         }
 
     def _dict_to_entry(self, data: Dict[str, Any]) -> AuditEntry:
@@ -88,6 +96,8 @@ class ImmutableAuditLog:
             cost_usd=data["cost_usd"],
             trace_id=data.get("trace_id"),
             prev_hash=data.get("prev_hash"),
+            agent_credential_id=data.get("agent_credential_id"),
+            agent_signature=data.get("agent_signature"),
         )
 
     def _calculate_hash(self, data: Dict[str, Any]) -> str:

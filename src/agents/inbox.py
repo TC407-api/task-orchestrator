@@ -68,6 +68,8 @@ class AgentEvent:
         data: Event-specific data
         source: Where the event originated (e.g., 'agent_xyz', 'system')
         related_approval_id: Links to approval action if applicable
+        agent_credential_id: Cryptographic agent identity (NHI binding)
+        signature: Agent's cryptographic signature of this event
     """
     event_id: str = field(default_factory=lambda: str(uuid4())[:8])
     event_type: EventType = EventType.TEXT_OUTPUT
@@ -76,6 +78,9 @@ class AgentEvent:
     data: dict = field(default_factory=dict)
     source: str = "system"
     related_approval_id: Optional[str] = None
+    # Security enhancements for NHI binding
+    agent_credential_id: Optional[str] = None
+    signature: Optional[str] = None  # Base64-encoded signature
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -87,7 +92,21 @@ class AgentEvent:
             "data": self.data,
             "source": self.source,
             "related_approval_id": self.related_approval_id,
+            "agent_credential_id": self.agent_credential_id,
+            "signature": self.signature,
         }
+
+    def get_signable_content(self) -> bytes:
+        """Get the content that should be signed for verification."""
+        import json
+        signable = {
+            "event_id": self.event_id,
+            "event_type": self.event_type.value,
+            "agent_name": self.agent_name,
+            "timestamp": self.timestamp.isoformat(),
+            "data": self.data,
+        }
+        return json.dumps(signable, sort_keys=True).encode("utf-8")
 
 
 @dataclass

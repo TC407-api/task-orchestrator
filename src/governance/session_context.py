@@ -1,10 +1,17 @@
-"""Persistent session context across terminal restarts."""
+"""Persistent session context across terminal restarts.
+
+Enhanced with security fields for agent identity binding and risk scoring.
+"""
 import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Set, Dict, Any
+from typing import List, Optional, Set, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.governance.agent_identity import AgentCredential
+    from src.governance.session_risk_scoring import SessionRiskScore
 
 
 @dataclass
@@ -19,6 +26,10 @@ class SessionContext:
         files_accessed: Set of file paths accessed during session
         conversation_summary: Summary of conversation history
         token_usage: Total tokens used in session
+        agent_credential_id: Bound agent credential ID (NHI)
+        risk_score: Most recent risk assessment
+        env_fingerprint: Environment fingerprint for device binding
+        integrity_chain: Chain of action hashes for audit trail
     """
     session_id: str
     created_at: datetime
@@ -26,6 +37,11 @@ class SessionContext:
     files_accessed: Set[str] = field(default_factory=set)
     conversation_summary: List[Dict[str, str]] = field(default_factory=list)
     token_usage: int = 0
+    # Security enhancements
+    agent_credential_id: Optional[str] = None
+    risk_score: Optional[float] = None
+    env_fingerprint: Optional[str] = None
+    integrity_chain: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to serializable dict."""
@@ -36,6 +52,10 @@ class SessionContext:
             "files_accessed": list(self.files_accessed),
             "conversation_summary": self.conversation_summary,
             "token_usage": self.token_usage,
+            "agent_credential_id": self.agent_credential_id,
+            "risk_score": self.risk_score,
+            "env_fingerprint": self.env_fingerprint,
+            "integrity_chain": self.integrity_chain,
         }
 
     @classmethod
@@ -48,7 +68,27 @@ class SessionContext:
             files_accessed=set(data.get("files_accessed", [])),
             conversation_summary=data.get("conversation_summary", []),
             token_usage=data.get("token_usage", 0),
+            agent_credential_id=data.get("agent_credential_id"),
+            risk_score=data.get("risk_score"),
+            env_fingerprint=data.get("env_fingerprint"),
+            integrity_chain=data.get("integrity_chain", []),
         )
+
+    def bind_agent(self, credential_id: str) -> None:
+        """Bind this session to an agent credential."""
+        self.agent_credential_id = credential_id
+
+    def update_risk_score(self, score: float) -> None:
+        """Update the session's risk score."""
+        self.risk_score = score
+
+    def set_fingerprint(self, fingerprint: str) -> None:
+        """Set the environment fingerprint."""
+        self.env_fingerprint = fingerprint
+
+    def add_to_integrity_chain(self, action_hash: str) -> None:
+        """Add an action hash to the integrity chain."""
+        self.integrity_chain.append(action_hash)
 
 
 class SessionManager:
