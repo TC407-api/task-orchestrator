@@ -25,7 +25,7 @@ class TestMarketingContent:
         landing_page = MARKETING_DIR / "landing-page.md"
         assert landing_page.exists(), "landing-page.md should exist"
 
-        content = landing_page.read_text()
+        content = landing_page.read_text(encoding="utf-8")
 
         # Check for required sections
         required = [
@@ -54,7 +54,7 @@ class TestMarketingContent:
         features = MARKETING_DIR / "feature-highlights.md"
         assert features.exists(), "feature-highlights.md should exist"
 
-        content = features.read_text()
+        content = features.read_text(encoding="utf-8")
 
         # Count feature sections (##)
         feature_count = content.count("## ")
@@ -66,7 +66,7 @@ class TestMarketingContent:
         comparison = MARKETING_DIR / "comparison-table.md"
         assert comparison.exists(), "comparison-table.md should exist"
 
-        content = comparison.read_text()
+        content = comparison.read_text(encoding="utf-8")
 
         competitors = ["LangGraph", "CrewAI", "AutoGen", "Langfuse"]
 
@@ -80,7 +80,7 @@ class TestMarketingContent:
         demo = MARKETING_DIR / "demo-script.md"
         assert demo.exists(), "demo-script.md should exist"
 
-        content = demo.read_text()
+        content = demo.read_text(encoding="utf-8")
 
         # Should have time markers
         assert "0:00" in content, "Demo script should have timing markers"
@@ -96,6 +96,6 @@ class TestMarketingContent:
         assert len(md_files) >= 4, f"Should have at least 4 md files, found {len(md_files)}"
 
         for md_file in md_files:
-            content = md_file.read_text()
+            content = md_file.read_text(encoding="utf-8")
             # Basic markdown validation - has headers
             assert "#" in content, f"{md_file.name} should contain markdown headers"
