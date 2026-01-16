@@ -1,9 +1,48 @@
-# Session State - 2026-01-12
+# Session State - 2026-01-16
 
 ## Current Task
-Agent Evaluation System for task-orchestrator MCP server - **ALL PHASES COMPLETE + LEARNINGS EXTRACTED**
+**BATCH 2 COMPLETE** - TerminalLoop, ShadowValidator, @workflow decorators, BackgroundTaskManager
 
-## Progress
+## Latest Session (2026-01-16) - Batch 2 Features
+- [x] Implemented TerminalLoop with pause/resume/cancel, state machine, retry with exponential backoff
+- [x] Enhanced ShadowValidator with AST comparison, mutation detection, import tracking
+- [x] Added @workflow/@step decorators with dependency resolution, parallel execution, parameter injection
+- [x] Added BackgroundTaskManager with priority queue, worker pool, retry logic, dead letter queue
+- [x] Fixed all 66 batch 2 TDD tests to align with implementation APIs
+- [x] **680 tests passing** (1 skipped)
+- [x] Extracted 6 learnings to knowledge graph
+- [x] Cleaned up ~100 generated doc/temp files
+
+### Batch 2 Commits
+- `59b6b5e` feat(batch2): implement TerminalLoop, ShadowValidator, @workflow decorators, BackgroundTaskManager
+- `1dee7eb` chore: clean up generated docs and update package.json
+
+### Batch 2 Key Files
+- `src/agents/terminal_loop.py` - TerminalLoop + LoopState + LoopIteration
+- `src/agents/shadow_validator.py` - ShadowValidator + AST comparison
+- `src/agents/workflows.py` - @workflow/@step decorators + WorkflowStepDef
+- `src/agents/background_tasks.py` - BackgroundTaskManager + priority queue
+- `tests/test_yoink_batch2.py` - 66 TDD spec tests (all passing)
+
+### Batch 2 Key Decisions
+- asyncio.Semaphore for worker pool concurrency limiting
+- asyncio.Event for CPU-efficient pause/resume in TerminalLoop
+- @step decorator attaches metadata to methods, @workflow collects via dir(cls)
+- is_valid = False when mutations OR security violations detected
+- Task handlers accept optional data param: async def handler(data=None)
+- Compare enum values not strings: status == TaskManagerStatus.COMPLETED
+
+### Batch 2 Learnings Extracted (group: cross-project-learnings)
+- `learning-task-orchestrator-async-patterns-20260116`
+- `learning-task-orchestrator-tdd-workflow-20260116`
+- `learning-task-orchestrator-decorator-workflow-20260116`
+- `learning-task-orchestrator-self-healing-20260116`
+- `learning-task-orchestrator-ast-validation-20260116`
+- `learning-task-orchestrator-background-tasks-20260116`
+
+---
+
+## Previous Progress (Phases 1-10)
 - [x] Phase 1: Foundation (Trial, Graders, Export, Integration)
 - [x] Phase 2: MCP Server Integration (semantic failure tracking, eval in handlers)
 - [x] Phase 3: Evaluation Suites (unit.py, resilience.py)
@@ -12,13 +51,10 @@ Agent Evaluation System for task-orchestrator MCP server - **ALL PHASES COMPLETE
 - [x] Phase 6: Full Integration (immune hooks in spawn_agent/parallel, model graders, MCP tools)
 - [x] Phase 7: Production Ready (specialized graders, Graphiti persistence, dashboard, CI/CD)
 - [x] Phase 8: Advanced Features (Langfuse deep integration, alerting, federation, ML prediction)
-- [x] **Post-Phase: MCP Tools for Alerting & Prediction** (alert_list, alert_clear, predict_risk)
-- [x] **Phase 9: Cross-Project Federation** (registry, decay, federation MCP tools)
-- [x] **Phase 10: Live Graphiti Sync** (sync protocol, subscriber, engine, conflict resolver, hooks, monitor)
-- [x] **Verification passed** (213 tests)
-- [x] **Learnings Extracted** (5 patterns stored in Graphiti)
+- [x] Phase 9: Cross-Project Federation (registry, decay, federation MCP tools)
+- [x] Phase 10: Live Graphiti Sync (sync protocol, subscriber, engine, conflict resolver, hooks, monitor)
 
-## Latest Session Work (2026-01-12)
+## Archive: Session 2026-01-12
 
 ### Learnings Extracted to Graphiti
 Ran `/learn extract` and stored 5 key patterns:
