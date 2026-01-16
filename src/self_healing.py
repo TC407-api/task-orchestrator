@@ -259,6 +259,88 @@ class CircuitBreaker:
                 "total_semantic_failures": sum(self._semantic_failures.values()),
             }
 
+    async def call_with_fallback(
+        self,
+        func: Callable[..., T],
+        fallback: T,
+        *args,
+        **kwargs,
+    ) -> T:
+        """
+        Call function with circuit breaker protection and fallback on failure.
+
+        When circuit is OPEN, returns fallback immediately instead of raising.
+        This enables graceful degradation - the system continues with cached/default
+        values rather than failing hard.
+
+        Pattern learned from: mind-health-flow (AI note generation with circuit breaker)
+
+        Args:
+            func: Async function to call
+            fallback: Value to return if circuit is OPEN or call fails
+            *args: Positional arguments for func
+            **kwargs: Keyword arguments for func
+
+        Returns:
+            Result from func, or fallback value if circuit is OPEN or call fails
+
+        Example:
+            breaker = CircuitBreaker.get("ai_service")
+            cached_response = {"status": "cached", "data": last_known_good}
+
+            result = await breaker.call_with_fallback(
+                fetch_ai_response,
+                fallback=cached_response,
+                prompt="Generate summary"
+            )
+        """
+        can_proceed, retry_after = self.is_available()
+
+        if not can_proceed:
+            # Circuit is OPEN - return fallback gracefully
+            return fallback
+
+        try:
+            result = await func(*args, **kwargs)
+            self.record_success()
+            return result
+        except Exception as e:
+            self.record_failure(e)
+            # Return fallback instead of raising
+            return fallback
+
+    def call_with_fallback_sync(
+        self,
+        func: Callable[..., T],
+        fallback: T,
+        *args,
+        **kwargs,
+    ) -> T:
+        """
+        Synchronous version of call_with_fallback.
+
+        Args:
+            func: Sync function to call
+            fallback: Value to return if circuit is OPEN or call fails
+            *args: Positional arguments for func
+            **kwargs: Keyword arguments for func
+
+        Returns:
+            Result from func, or fallback value if circuit is OPEN or call fails
+        """
+        can_proceed, retry_after = self.is_available()
+
+        if not can_proceed:
+            return fallback
+
+        try:
+            result = func(*args, **kwargs)
+            self.record_success()
+            return result
+        except Exception as e:
+            self.record_failure(e)
+            return fallback
+
 
 class CircuitBreakerOpen(Exception):
     """Raised when circuit breaker is open."""
@@ -298,6 +380,35 @@ def with_circuit_breaker(
                 breaker.record_failure(e)
                 raise
 
+        return wrapper
+    return decorator
+
+
+def with_circuit_breaker_fallback(
+    service_name: str,
+    fallback_value: T,
+    config: Optional[CircuitBreakerConfig] = None,
+):
+    """
+    Decorator to wrap async function with circuit breaker and graceful degradation.
+
+    Unlike with_circuit_breaker which raises CircuitBreakerOpen, this decorator
+    returns the fallback_value when the circuit is open or when the call fails.
+
+    Pattern learned from: mind-health-flow (AI note generation with circuit breaker)
+
+    Example:
+        @with_circuit_breaker_fallback("ai_service", fallback_value={"cached": True})
+        async def fetch_ai_response(prompt: str):
+            # ...
+
+        # When circuit is open, returns {"cached": True} instead of raising
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            breaker = CircuitBreaker.get(service_name, config)
+            return await breaker.call_with_fallback(func, fallback_value, *args, **kwargs)
         return wrapper
     return decorator
 
