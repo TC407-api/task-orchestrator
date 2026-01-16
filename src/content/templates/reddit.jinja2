@@ -1,0 +1,19 @@
+{# Reddit Post Template #}
+{# Markdown format, community-appropriate tone #}
+{# Note: No hashtags on Reddit #}
+
+{%- if ai_content -%}
+{{ ai_content }}
+{%- else -%}
+# {{ topic }}
+
+{{ source_content }}
+{%- endif %}
+
+---
+
+{%- if link_url %}
+**Source:** {{ link_url }}
+{%- endif %}
+
+*Happy to answer any questions in the comments!*

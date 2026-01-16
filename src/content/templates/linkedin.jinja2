@@ -1,0 +1,23 @@
+{# LinkedIn Post Template #}
+{# Professional tone, single post format #}
+{# Max 3000 chars #}
+
+{%- if ai_content -%}
+{{ ai_content }}
+{%- else -%}
+{{ topic }}
+
+{{ source_content | truncate_smart(2500) }}
+{%- endif %}
+
+---
+
+{%- if supports_hashtags and hashtags %}
+
+{{ hashtags[:5] | format_hashtags }}
+{%- endif %}
+
+{%- if supports_links and link_url %}
+
+Read more: {{ link_url }}
+{%- endif %}

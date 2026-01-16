@@ -1,0 +1,32 @@
+{# Dev.to Article Template #}
+{# Full markdown format with front matter #}
+---
+title: {{ topic }}
+published: false
+{%- if hashtags %}
+tags: {{ hashtags[:4] | join(', ') }}
+{%- endif %}
+---
+
+{%- if ai_content %}
+{{ ai_content }}
+{%- else %}
+## Introduction
+
+{{ source_content | truncate_smart(500) }}
+
+## Key Points
+
+{{ source_content }}
+
+## Conclusion
+
+Thanks for reading! If you found this helpful, consider following for more content.
+{%- endif %}
+
+{%- if link_url %}
+
+---
+
+**Original source:** [{{ topic }}]({{ link_url }})
+{%- endif %}

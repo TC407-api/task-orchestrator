@@ -1,0 +1,21 @@
+{# Twitter Thread Template #}
+{# Optimized for engagement and thread format #}
+{# Max 280 chars per tweet #}
+
+{%- if ai_content -%}
+{{ ai_content | truncate_smart(250) }}
+{%- else -%}
+{{ topic }}
+
+{{ source_content | truncate_smart(200) }}
+{%- endif %}
+
+{%- if supports_hashtags and hashtags %}
+
+{{ hashtags[:3] | format_hashtags }}
+{%- endif %}
+
+{%- if supports_links and link_url %}
+
+{{ link_url }}
+{%- endif %}
