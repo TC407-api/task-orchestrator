@@ -1,0 +1,41 @@
+{
+  "name": "@task-orchestrator/mcp-server",
+  "version": "1.0.0",
+  "description": "Self-healing AI agent orchestration with immune system for production Claude workflows",
+  "keywords": [
+    "mcp",
+    "claude",
+    "ai-agents",
+    "orchestration",
+    "self-healing",
+    "immune-system",
+    "evaluation",
+    "cost-management",
+    "langfuse"
+  ],
+  "author": "Task Orchestrator Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/task-orchestrator/task-orchestrator"
+  },
+  "homepage": "https://task-orchestrator.dev",
+  "mcp": {
+    "server": {
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "cwd": "."
+    },
+    "tools": 44,
+    "categories": [
+      "orchestration",
+      "evaluation",
+      "cost-management",
+      "self-healing",
+      "federation"
+    ]
+  },
+  "engines": {
+    "python": ">=3.10"
+  }
+}

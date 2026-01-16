@@ -1,0 +1,112 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schemas/v1/mcp.json",
+  "name": "task-orchestrator",
+  "version": "1.0.0",
+  "description": "The self-healing AI agent platform for production Claude workflows",
+  "author": "Task Orchestrator Team",
+  "license": "MIT",
+  "server": {
+    "command": "python",
+    "args": ["mcp_server.py"],
+    "env": {
+      "PYTHONPATH": "."
+    }
+  },
+  "features": [
+    {
+      "name": "self-healing",
+      "description": "Circuit breaker patterns with exponential backoff and automatic recovery"
+    },
+    {
+      "name": "immune-system",
+      "description": "ML-powered failure pattern detection and prevention"
+    },
+    {
+      "name": "cost-management",
+      "description": "Real-time cost tracking with budget limits across providers"
+    },
+    {
+      "name": "evaluation",
+      "description": "Trial-based evaluation system with custom graders"
+    },
+    {
+      "name": "federation",
+      "description": "Cross-project pattern sharing and learning"
+    },
+    {
+      "name": "archetypes",
+      "description": "Specialized agent roles (architect, builder, qc, researcher)"
+    }
+  ],
+  "toolCategories": {
+    "tasks": {
+      "description": "Task management and prioritization",
+      "tools": ["tasks_list", "tasks_add", "tasks_sync_email", "tasks_schedule", "tasks_complete", "tasks_analyze", "tasks_briefing"]
+    },
+    "cost": {
+      "description": "Cost tracking and budget management",
+      "tools": ["cost_summary", "cost_set_budget"]
+    },
+    "healing": {
+      "description": "Self-healing infrastructure",
+      "tools": ["healing_status"]
+    },
+    "agents": {
+      "description": "Agent spawning and orchestration",
+      "tools": ["spawn_agent", "spawn_parallel_agents", "spawn_archetype_agent"]
+    },
+    "immune": {
+      "description": "Immune system for failure prevention",
+      "tools": ["immune_status", "immune_check", "immune_failures", "immune_dashboard", "immune_sync"]
+    },
+    "federation": {
+      "description": "Cross-project pattern sharing",
+      "tools": ["federation_status", "federation_subscribe", "federation_search", "federation_decay"]
+    },
+    "sync": {
+      "description": "Live synchronization",
+      "tools": ["sync_status", "sync_trigger", "sync_alerts"]
+    },
+    "inbox": {
+      "description": "Universal inbox and approvals",
+      "tools": ["inbox_status", "approve_action"]
+    },
+    "audit": {
+      "description": "Audit workflow management",
+      "tools": ["audit_status", "audit_append"]
+    },
+    "validation": {
+      "description": "Code validation and error capture",
+      "tools": ["run_with_error_capture", "validate_code"]
+    },
+    "workflows": {
+      "description": "Workflow triggers",
+      "tools": ["trigger_workflow", "list_workflows"]
+    },
+    "scheduling": {
+      "description": "Background task scheduling",
+      "tools": ["schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"]
+    },
+    "alerts": {
+      "description": "Alert management",
+      "tools": ["alert_list", "alert_clear"]
+    },
+    "prediction": {
+      "description": "Risk prediction",
+      "tools": ["predict_risk"]
+    },
+    "archetypes": {
+      "description": "Agent archetype information",
+      "tools": ["archetype_info"]
+    }
+  },
+  "requirements": {
+    "python": ">=3.10",
+    "dependencies": "requirements.txt"
+  },
+  "documentation": {
+    "quickStart": "QUICK_START.md",
+    "reference": "QUICK_REFERENCE.md",
+    "readme": "README.md"
+  }
+}
