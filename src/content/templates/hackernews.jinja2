@@ -1,0 +1,16 @@
+{# Hacker News Post Template #}
+{# Plain text, technical focus, Show HN format #}
+{# Max 2000 chars, no hashtags, no images #}
+
+{%- if ai_content -%}
+{{ ai_content | truncate_smart(1800) }}
+{%- else -%}
+Show HN: {{ topic }}
+
+{{ source_content | truncate_smart(1500) }}
+{%- endif %}
+
+{%- if link_url %}
+
+{{ link_url }}
+{%- endif %}

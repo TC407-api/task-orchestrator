@@ -33,6 +33,7 @@ from ..self_healing import (
 )
 from .tool_router import ToolRouter, ToolCategory, TOOL_CATEGORIES
 from .context_tracker import ContextTracker
+from .content_tools import CONTENT_TOOLS, ContentToolsHandler
 
 
 class TaskOrchestratorMCP:
@@ -80,6 +81,9 @@ class TaskOrchestratorMCP:
         # Dynamic tool loading components (Phase 10)
         self._context_tracker = ContextTracker()
         self._tool_router: Optional[ToolRouter] = None  # Initialized after get_tools() first call
+
+        # Content automation components (Phase 11)
+        self._content_tools_handler: Optional[ContentToolsHandler] = None
 
     async def _get_federation(self):
         """
@@ -132,6 +136,22 @@ class TaskOrchestratorMCP:
             # API key not set - coordinator without LLM
             self.coordinator = CoordinatorAgent()
             self._initialized = True
+
+    async def _get_content_tools_handler(self) -> ContentToolsHandler:
+        """Get or create the ContentToolsHandler."""
+        if self._content_tools_handler is None:
+            # Ensure background scheduler is initialized
+            if self._background_scheduler is None:
+                self._background_scheduler = BackgroundTaskScheduler(
+                    inbox=self._universal_inbox
+                )
+                await self._background_scheduler.start()
+
+            self._content_tools_handler = ContentToolsHandler(
+                scheduler=self._background_scheduler,
+                inbox=self._universal_inbox,
+            )
+        return self._content_tools_handler
 
     def get_tools(self) -> list[dict]:
         """Return MCP tool definitions."""
@@ -809,7 +829,7 @@ class TaskOrchestratorMCP:
                     "required": ["category"],
                 },
             },
-        ]
+        ] + CONTENT_TOOLS  # Content automation tools (Phase 11)
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
         """Handle an MCP tool call."""
@@ -862,6 +882,26 @@ class TaskOrchestratorMCP:
             # Dynamic tool loading (Phase 10)
             "request_tool": self._handle_request_tool,
         }
+
+        # Content automation handlers (Phase 11)
+        content_handlers = {
+            "content_generate": "_handle_content_generate",
+            "content_schedule": "_handle_content_schedule",
+            "content_publish": "_handle_content_publish",
+            "content_publish_all": "_handle_content_publish_all",
+            "content_status": "_handle_content_status",
+            "content_list_campaigns": "_handle_content_list_campaigns",
+            "content_cancel": "_handle_content_cancel",
+        }
+
+        # Check if it's a content tool
+        if name in content_handlers:
+            try:
+                content_handler = await self._get_content_tools_handler()
+                handler_method = getattr(content_handler, content_handlers[name].replace("_handle_", "handle_"))
+                return await handler_method(arguments)
+            except Exception as e:
+                return {"error": str(e)}
 
         handler = handlers.get(name)
         if not handler:
