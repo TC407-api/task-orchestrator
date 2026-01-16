@@ -638,3 +638,420 @@ def process_prompt_with_workflows(
     """
     executor = get_workflow_executor(base_path)
     return executor.prepare_context(prompt, archetype=archetype)
+
+
+# ============================================================================
+# Decorator-based Workflow System
+# ============================================================================
+
+import asyncio
+import inspect
+import time
+from typing import Callable, Union
+from functools import wraps
+
+
+class StepStatus(str, Enum):
+    """Status of a workflow step."""
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
+@dataclass
+class WorkflowStepDef:
+    """Definition of a workflow step."""
+    name: str
+    handler: str
+    depends_on: List[str] = field(default_factory=list)
+    timeout: Optional[float] = None
+    retry_count: int = 0
+    condition: Optional[Callable] = None
+    required: bool = True
+
+
+@dataclass
+class DecoratorWorkflowState:
+    """State tracking for decorator-based workflows."""
+    workflow_id: str
+    status: StepStatus = StepStatus.PENDING
+    current_step: str = ""
+    results: Dict[str, Any] = field(default_factory=dict)
+    errors: Dict[str, str] = field(default_factory=dict)
+
+
+def step(
+    name: str,
+    description: Optional[str] = None,
+    depends_on: Optional[List[str]] = None,
+    timeout: Optional[float] = None,
+    retry_count: int = 0,
+    condition: Optional[Callable] = None,
+    required: bool = True,
+):
+    """Decorator to mark a method as a workflow step.
+
+    Args:
+        name: Step name (must be unique within workflow)
+        depends_on: List of step names this step depends on
+        timeout: Optional timeout in seconds
+        retry_count: Number of retry attempts on failure
+        condition: Optional callable to determine if step should run
+        required: Whether step is required (if False, failures are non-fatal)
+
+    Example:
+        @step("load_data", timeout=30)
+        async def load_data(self):
+            return await fetch_data()
+
+        @step("process", depends_on=["load_data"])
+        async def process(self, load_data):
+            # 'load_data' parameter receives result from load_data step
+            return process(load_data)
+    """
+
+    def decorator(func):
+        func._step_name = name
+        func._depends_on = depends_on or []
+        func._timeout = timeout
+        func._retry_count = retry_count
+        func._condition = condition
+        func._required = required
+        return func
+
+    return decorator
+
+
+def workflow(
+    name: str,
+    description: Optional[str] = None,
+    persistent: bool = False,
+    on_start: Optional[Callable] = None,
+    on_complete: Optional[Callable] = None,
+):
+    """Decorator to mark a class as a workflow with managed execution.
+
+    Args:
+        name: Workflow name
+        persistent: Whether to enable state persistence
+        on_start: Optional callback when workflow starts
+        on_complete: Optional callback when workflow completes
+
+    The decorated class gains the following methods:
+        - execute(continue_on_error=False): Execute all steps
+        - get_state(): Get current workflow state
+        - cancel(): Cancel execution
+        - save_state()/restore_state(): Serialize/deserialize state
+        - get_metrics(): Get execution metrics
+
+    Example:
+        @workflow("data_pipeline", persistent=True)
+        class DataPipeline:
+            @step("extract")
+            async def extract(self):
+                return await extract_data()
+
+            @step("transform", depends_on=["extract"])
+            async def transform(self, extract):
+                return transform(extract)
+
+            @step("load", depends_on=["transform"])
+            async def load(self, transform):
+                return load_data(transform)
+
+        pipeline = DataPipeline()
+        await pipeline.execute()
+        metrics = pipeline.get_metrics()
+    """
+
+    def decorator(cls):
+        # Store workflow metadata on class
+        cls._workflow_name = name
+        cls._persistent = persistent
+        cls._on_start = on_start
+        cls._on_complete = on_complete
+
+        # Collect all step definitions from class methods
+        steps: Dict[str, WorkflowStepDef] = {}
+        for attr_name in dir(cls):
+            attr = getattr(cls, attr_name)
+            if hasattr(attr, "_step_name"):
+                step_def = WorkflowStepDef(
+                    name=attr._step_name,
+                    handler=attr_name,
+                    depends_on=attr._depends_on,
+                    timeout=attr._timeout,
+                    retry_count=attr._retry_count,
+                    condition=attr._condition,
+                    required=attr._required,
+                )
+                steps[attr._step_name] = step_def
+
+        cls._workflow_steps = steps
+
+        # Inject workflow methods
+        def __init__(self, *args, **kwargs):
+            # Call original init if it exists
+            if hasattr(cls, "__init_original__"):
+                cls.__init_original__(self, *args, **kwargs)
+
+            # Initialize workflow state
+            self._state = DecoratorWorkflowState(workflow_id=name)
+            self._cancelled = False
+            self._start_time: Optional[float] = None
+            self._end_time: Optional[float] = None
+            self._steps_executed: int = 0
+
+        # Save original init if exists
+        if hasattr(cls, "__init__") and cls.__init__ is not object.__init__:
+            cls.__init_original__ = cls.__init__
+        cls.__init__ = __init__
+
+        async def execute(self, continue_on_error: bool = False) -> Dict[str, Any]:
+            """Execute all workflow steps in dependency order.
+
+            Args:
+                continue_on_error: If True, continue executing non-dependent steps after failures
+
+            Returns:
+                Dict mapping step names to their results
+            """
+            self._start_time = time.time()
+            self._state.status = StepStatus.RUNNING
+            self._cancelled = False
+
+            if cls._on_start:
+                await cls._on_start(self)
+
+            # Build dependency graph
+            step_defs = cls._workflow_steps
+            pending_steps = set(step_defs.keys())
+            completed_steps = set()
+            failed_steps = set()
+
+            while pending_steps and not self._cancelled:
+                # Find steps ready to execute (all dependencies met)
+                ready_steps = []
+                for step_name in list(pending_steps):
+                    step_def = step_defs[step_name]
+
+                    # Check dependencies
+                    deps_met = all(
+                        dep in completed_steps or dep in failed_steps
+                        for dep in step_def.depends_on
+                    )
+
+                    # Check if any required dependency failed
+                    required_dep_failed = any(
+                        dep in failed_steps and step_defs[dep].required
+                        for dep in step_def.depends_on
+                    )
+
+                    if required_dep_failed:
+                        # Skip this step
+                        self._state.errors[step_name] = "Required dependency failed"
+                        pending_steps.remove(step_name)
+                        failed_steps.add(step_name)
+                        continue
+
+                    # Check condition
+                    if step_def.condition and not step_def.condition(self):
+                        # Skip this step
+                        pending_steps.remove(step_name)
+                        continue
+
+                    if deps_met:
+                        ready_steps.append(step_name)
+
+                if not ready_steps:
+                    # No steps ready - either blocked or done
+                    break
+
+                # Execute ready steps in parallel
+                tasks = []
+                for step_name in ready_steps:
+                    step_def = step_defs[step_name]
+                    tasks.append(self._execute_step(step_name, step_def))
+
+                # Wait for all parallel steps to complete
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Process results
+                for step_name, result in zip(ready_steps, results):
+                    pending_steps.remove(step_name)
+                    self._steps_executed += 1
+
+                    if isinstance(result, Exception):
+                        # Step failed
+                        self._state.errors[step_name] = str(result)
+                        failed_steps.add(step_name)
+                        if not continue_on_error and step_defs[step_name].required:
+                            # Stop execution on first required step failure
+                            self._cancelled = True
+                            break
+                    else:
+                        # Step succeeded
+                        self._state.results[step_name] = result
+                        completed_steps.add(step_name)
+
+            self._end_time = time.time()
+
+            # Determine final status
+            if self._cancelled:
+                self._state.status = StepStatus.FAILED
+            elif failed_steps:
+                self._state.status = StepStatus.FAILED
+            else:
+                self._state.status = StepStatus.COMPLETED
+
+            if cls._on_complete:
+                await cls._on_complete(self, self._state)
+
+            return self._state.results
+
+        cls.execute = execute
+
+        async def _execute_step(
+            self, step_name: str, step_def: WorkflowStepDef
+        ) -> Any:
+            """Execute a single step with retries and timeout.
+
+            Args:
+                step_name: Name of the step
+                step_def: Step definition
+
+            Returns:
+                Step result
+
+            Raises:
+                Exception: If step fails after all retries
+            """
+            self._state.current_step = step_name
+            handler = getattr(self, step_def.handler)
+
+            # Get handler signature for parameter injection
+            sig = inspect.signature(handler)
+            params = {}
+
+            for param_name, param in sig.parameters.items():
+                if param_name == "self":
+                    continue
+
+                # Check if parameter name matches a step name result
+                if param_name in self._state.results:
+                    params[param_name] = self._state.results[param_name]
+                else:
+                    # Search within step results for matching keys
+                    for step_result in self._state.results.values():
+                        if isinstance(step_result, dict) and param_name in step_result:
+                            params[param_name] = step_result[param_name]
+                            break
+
+            # Execute with retries
+            last_exception = None
+            for attempt in range(step_def.retry_count + 1):
+                try:
+                    if step_def.timeout:
+                        result = await asyncio.wait_for(
+                            handler(**params), timeout=step_def.timeout
+                        )
+                    else:
+                        result = await handler(**params)
+
+                    return result
+                except asyncio.TimeoutError as e:
+                    last_exception = e
+                    if attempt < step_def.retry_count:
+                        await asyncio.sleep(2**attempt)  # Exponential backoff
+                    continue
+                except Exception as e:
+                    last_exception = e
+                    if attempt < step_def.retry_count:
+                        await asyncio.sleep(2**attempt)
+                    continue
+
+            # All retries exhausted
+            raise last_exception or Exception(f"Step {step_name} failed")
+
+        cls._execute_step = _execute_step
+
+        def get_state(self) -> DecoratorWorkflowState:
+            """Get current workflow state.
+
+            Returns:
+                DecoratorWorkflowState instance
+            """
+            return self._state
+
+        cls.get_state = get_state
+
+        def cancel(self):
+            """Cancel workflow execution."""
+            self._cancelled = True
+
+        cls.cancel = cancel
+
+        def save_state(self) -> Dict[str, Any]:
+            """Serialize workflow state.
+
+            Returns:
+                Dict containing workflow state
+            """
+            return {
+                "workflow_id": self._state.workflow_id,
+                "status": self._state.status.value,
+                "current_step": self._state.current_step,
+                "results": self._state.results,
+                "errors": self._state.errors,
+                "start_time": self._start_time,
+                "end_time": self._end_time,
+                "steps_executed": self._steps_executed,
+            }
+
+        cls.save_state = save_state
+
+        def restore_state(self, state_dict: Dict[str, Any]):
+            """Restore workflow state from serialized data.
+
+            Args:
+                state_dict: Serialized state dict
+            """
+            self._state.workflow_id = state_dict["workflow_id"]
+            self._state.status = StepStatus(state_dict["status"])
+            self._state.current_step = state_dict["current_step"]
+            self._state.results = state_dict["results"]
+            self._state.errors = state_dict["errors"]
+            self._start_time = state_dict.get("start_time")
+            self._end_time = state_dict.get("end_time")
+            self._steps_executed = state_dict.get("steps_executed", 0)
+
+        cls.restore_state = restore_state
+
+        def get_metrics(self) -> Dict[str, Any]:
+            """Get workflow execution metrics.
+
+            Returns:
+                Dict with execution_time_ms and steps_executed
+            """
+            execution_time_ms = 0
+            if self._start_time and self._end_time:
+                execution_time_ms = int((self._end_time - self._start_time) * 1000)
+            elif self._start_time:
+                # Still running
+                execution_time_ms = int((time.time() - self._start_time) * 1000)
+
+            return {
+                "execution_time_ms": execution_time_ms,
+                "steps_executed": self._steps_executed,
+                "status": self._state.status.value,
+                "failed_steps": list(self._state.errors.keys()),
+                "completed_steps": list(self._state.results.keys()),
+            }
+
+        cls.get_metrics = get_metrics
+
+        return cls
+
+    return decorator

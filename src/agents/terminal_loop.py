@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import AsyncGenerator, Callable, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from .inbox import AgentEvent, EventType, UniversalInbox
@@ -795,3 +795,372 @@ class TerminalListener:
     async def clear_history(self) -> None:
         """Clear error history."""
         self.error_capture.error_history.clear()
+
+
+# ====================================================================
+# TerminalLoop - Infinite Agent Loop Implementation
+# ====================================================================
+
+
+class LoopState(str, Enum):
+    """State of the terminal loop."""
+    IDLE = "idle"
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class LoopIteration:
+    """Record of a single loop iteration."""
+    iteration_number: int
+    timestamp: datetime
+    input_data: Dict[str, Any]
+    output_data: Optional[Dict[str, Any]] = None
+    duration_ms: float = 0.0
+    error: Optional[str] = None
+    status: str = "pending"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return {
+            "iteration_number": self.iteration_number,
+            "timestamp": self.timestamp.isoformat(),
+            "input_data": self.input_data,
+            "output_data": self.output_data,
+            "duration_ms": self.duration_ms,
+            "error": self.error,
+            "status": self.status,
+        }
+
+
+class TerminalLoop:
+    """
+    Infinite agent loop with pause/resume, retry, and persistence.
+
+    Executes a task repeatedly, chaining outputs to inputs, with support for:
+    - Pause/resume control
+    - Exponential backoff retry
+    - Iteration history tracking
+    - Persistent state saving
+    - Configurable loop conditions
+    - Timeout protection
+
+    Usage:
+        loop = TerminalLoop(
+            name="data_processor",
+            max_iterations=100,
+            timeout_seconds=300.0,
+            persistent=True
+        )
+
+        async def process_task(data):
+            # Do work
+            return {"result": processed_data}
+
+        result = await loop.run({"start": "value"}, process_task)
+    """
+
+    def __init__(
+        self,
+        name: str,
+        max_iterations: int = 100,
+        timeout_seconds: float = 300.0,
+        retry_policy: str = 'exponential_backoff',
+        max_retries: int = 3,
+        loop_condition: Optional[Callable] = None,
+        on_iteration_complete: Optional[Callable] = None,
+        persistent: bool = False,
+        persistence_path: Optional[str] = None
+    ):
+        """
+        Initialize terminal loop.
+
+        Args:
+            name: Loop identifier
+            max_iterations: Maximum iterations before stopping
+            timeout_seconds: Total timeout for entire run
+            retry_policy: Retry strategy ('exponential_backoff' or 'fixed')
+            max_retries: Maximum retry attempts per iteration
+            loop_condition: Optional callable(iteration) -> bool to control loop
+            on_iteration_complete: Optional callback after each iteration
+            persistent: Whether to save state to disk
+            persistence_path: Path for saving state (defaults to ./{name}_state.json)
+        """
+        self.name = name
+        self.max_iterations = max_iterations
+        self.timeout_seconds = timeout_seconds
+        self.retry_policy = retry_policy
+        self.max_retries = max_retries
+        self.loop_condition = loop_condition
+        self.on_iteration_complete = on_iteration_complete
+        self.persistent = persistent
+        self.persistence_path = persistence_path or f"./{name}_state.json"
+
+        # Internal state
+        self._state = LoopState.IDLE
+        self._pause_event = asyncio.Event()
+        self._pause_event.set()  # Not paused initially
+        self._cancel_flag = False
+        self._iteration_history: list[LoopIteration] = []
+        self._current_iteration: Optional[LoopIteration] = None
+        self._total_iterations_completed = 0
+        self._total_errors = 0
+        self._total_duration_ms = 0.0
+        self._running_task: Optional[asyncio.Task] = None
+
+    @property
+    def state(self) -> LoopState:
+        """Get current loop state."""
+        return self._state
+
+    async def run(self, input_data: Dict, task: Callable) -> Dict:
+        """
+        Run the loop with the given task.
+
+        Args:
+            input_data: Initial input data
+            task: Callable that receives data and returns output
+                  Can be sync or async function
+
+        Returns:
+            Final output data after loop completion
+
+        Raises:
+            asyncio.TimeoutError: If timeout_seconds exceeded
+            asyncio.CancelledError: If loop is cancelled
+        """
+        self._state = LoopState.RUNNING
+        self._cancel_flag = False
+        current_input = input_data
+
+        try:
+            # Create tracked task for cancellation
+            loop_coro = self._run_loop(current_input, task)
+            self._running_task = asyncio.create_task(loop_coro)
+
+            # Wrap entire execution in timeout
+            return await asyncio.wait_for(
+                self._running_task,
+                timeout=self.timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            self._state = LoopState.FAILED
+            raise
+        except asyncio.CancelledError:
+            self._state = LoopState.CANCELLED
+            raise
+        except Exception as e:
+            self._state = LoopState.FAILED
+            raise
+        finally:
+            self._running_task = None
+
+    async def _run_loop(self, input_data: Dict, task: Callable) -> Dict:
+        """Internal loop execution."""
+        current_input = input_data
+
+        for iteration_num in range(1, self.max_iterations + 1):
+            # Yield control to allow pause/cancel from other tasks
+            await asyncio.sleep(0)
+
+            # Check for pause
+            await self._pause_event.wait()
+
+            # Check for cancellation
+            if self._cancel_flag:
+                self._state = LoopState.CANCELLED
+                return current_input
+
+            # Execute iteration with retry
+            iteration = LoopIteration(
+                iteration_number=iteration_num,
+                timestamp=datetime.now(),
+                input_data=current_input
+            )
+            self._current_iteration = iteration
+
+            start_time = datetime.now()
+            should_continue = True
+
+            try:
+                output_data = await self._execute_with_retry(task, current_input)
+
+                duration = (datetime.now() - start_time).total_seconds() * 1000
+                iteration.output_data = output_data
+                iteration.duration_ms = duration
+                iteration.status = "success"
+
+                self._total_iterations_completed += 1
+                self._total_duration_ms += duration
+
+                # Chain output to next input
+                current_input = output_data
+
+                # Check loop condition with result AFTER successful execution
+                if self.loop_condition and not self.loop_condition(output_data):
+                    should_continue = False
+
+            except Exception as e:
+                duration = (datetime.now() - start_time).total_seconds() * 1000
+                iteration.error = str(e)
+                iteration.duration_ms = duration
+                iteration.status = "failed"
+                self._total_errors += 1
+
+                # Continue with same input on error
+                pass
+
+            finally:
+                self._iteration_history.append(iteration)
+                self._current_iteration = None
+
+                # Call completion callback
+                if self.on_iteration_complete:
+                    try:
+                        if asyncio.iscoroutinefunction(self.on_iteration_complete):
+                            await self.on_iteration_complete(iteration)
+                        else:
+                            self.on_iteration_complete(iteration)
+                    except Exception:
+                        pass  # Don't let callback errors break loop
+
+            # Break if loop_condition returned False
+            if not should_continue:
+                self._state = LoopState.COMPLETED
+                break
+
+        # Loop completed
+        self._state = LoopState.COMPLETED
+
+        # Save state if persistent
+        if self.persistent:
+            self._save_state()
+
+        return current_input
+
+    async def _execute_with_retry(self, task: Callable, input_data: Dict) -> Dict:
+        """
+        Execute task with retry policy.
+
+        Args:
+            task: Task to execute
+            input_data: Input data
+
+        Returns:
+            Task output
+
+        Raises:
+            Exception: If all retries exhausted
+        """
+        last_exception = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                # Execute task (handle both sync and async)
+                if asyncio.iscoroutinefunction(task):
+                    result = await task(input_data)
+                else:
+                    result = task(input_data)
+
+                return result
+
+            except Exception as e:
+                last_exception = e
+
+                if attempt < self.max_retries:
+                    # Calculate backoff delay
+                    if self.retry_policy == 'exponential_backoff':
+                        delay = 1 * (2 ** attempt)
+                    else:
+                        delay = 1
+
+                    await asyncio.sleep(delay)
+                else:
+                    # Max retries exhausted
+                    raise last_exception
+
+    def pause(self) -> None:
+        """Pause the loop after current iteration completes."""
+        if self._state == LoopState.RUNNING:
+            self._state = LoopState.PAUSED
+            self._pause_event.clear()
+
+    def resume(self) -> None:
+        """Resume a paused loop."""
+        if self._state == LoopState.PAUSED:
+            self._state = LoopState.RUNNING
+            self._pause_event.set()
+
+    def cancel(self) -> None:
+        """Cancel the loop immediately."""
+        self._cancel_flag = True
+        self._state = LoopState.CANCELLED
+        # Cancel the running task if any
+        if self._running_task and not self._running_task.done():
+            self._running_task.cancel()
+
+    def get_iteration_history(self) -> List[LoopIteration]:
+        """
+        Get history of all iterations.
+
+        Returns:
+            List of LoopIteration objects
+        """
+        return self._iteration_history.copy()
+
+    def get_statistics(self) -> Dict:
+        """
+        Get loop statistics.
+
+        Returns:
+            Dictionary with statistics
+        """
+        total_iterations = len(self._iteration_history)
+        successful_iterations = sum(
+            1 for it in self._iteration_history if it.status == "success"
+        )
+        failed_iterations = sum(
+            1 for it in self._iteration_history if it.status == "failed"
+        )
+
+        avg_duration = (
+            self._total_duration_ms / total_iterations
+            if total_iterations > 0
+            else 0.0
+        )
+
+        return {
+            "name": self.name,
+            "state": self._state.value,
+            "total_iterations": total_iterations,
+            "successful_iterations": successful_iterations,
+            "failed_iterations": failed_iterations,
+            "total_errors": self._total_errors,
+            "average_duration_ms": avg_duration,
+            "total_duration_ms": self._total_duration_ms,
+            "max_iterations": self.max_iterations,
+            "timeout_seconds": self.timeout_seconds,
+        }
+
+    def _save_state(self) -> None:
+        """Save loop state to JSON file."""
+        import json
+
+        state_data = {
+            "name": self.name,
+            "state": self._state.value,
+            "timestamp": datetime.now().isoformat(),
+            "statistics": self.get_statistics(),
+            "iteration_history": [
+                it.to_dict() for it in self._iteration_history
+            ],
+        }
+
+        try:
+            with open(self.persistence_path, 'w') as f:
+                json.dump(state_data, f, indent=2)
+        except Exception:
+            pass  # Silent fail on persistence errors

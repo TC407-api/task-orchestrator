@@ -752,3 +752,631 @@ class BackgroundTaskScheduler:
                  if r.status == TaskStatus.FAILED]
             ),
         }
+
+
+# ============================================================================
+# BackgroundTaskManager - Priority Queue Based Task Manager
+# ============================================================================
+
+
+class TaskManagerStatus(str, Enum):
+    """Status of a task execution in the task manager."""
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    RETRYING = "RETRYING"
+
+
+@dataclass
+class TaskManagerDefinition:
+    """Definition of a registered task in the task manager."""
+    id: str
+    name: str
+    handler: Callable
+    schedule: Optional[str] = None  # Cron expression for scheduled tasks
+    priority: int = 0  # Higher = higher priority
+    retries: int = 3
+    timeout: Optional[float] = None
+    dependencies: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TaskManagerExecution:
+    """A single execution instance of a task."""
+    task_id: str
+    execution_id: str
+    status: TaskManagerStatus = TaskManagerStatus.PENDING
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    result: Any = None
+    error: Optional[str] = None
+    retry_count: int = 0
+    data: Any = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return {
+            "task_id": self.task_id,
+            "execution_id": self.execution_id,
+            "status": self.status.value,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "result": str(self.result)[:500] if self.result else None,
+            "error": self.error,
+            "retry_count": self.retry_count,
+        }
+
+
+class BackgroundTaskManager:
+    """
+    Priority queue based task manager with retry logic and dependency support.
+
+    Features:
+    - Priority-based task execution (heapq)
+    - Exponential backoff retry (1s * 2^retry)
+    - Worker pool with semaphore (max_workers)
+    - Dead letter queue for failed tasks
+    - Task dependencies
+    - Execution history tracking
+    - Optional persistent storage
+    - Optional scheduler integration
+
+    Usage:
+        manager = BackgroundTaskManager(max_workers=4)
+        await manager.start()
+
+        # Register a task
+        task_id = manager.register_task(
+            name="process_data",
+            handler=process_func,
+            priority=10,
+            retries=3,
+            timeout=60.0,
+        )
+
+        # Enqueue for execution
+        execution_id = await manager.enqueue(task_id, data={"input": "value"})
+
+        # Check status
+        execution = manager.get_execution(execution_id)
+        print(execution.status)
+
+        await manager.stop()
+    """
+
+    def __init__(
+        self,
+        max_workers: int = 4,
+        enable_scheduler: bool = False,
+        persistent: bool = False,
+        storage_path: Optional[str] = None,
+        history_size: int = 100,
+    ):
+        """
+        Initialize the task manager.
+
+        Args:
+            max_workers: Maximum concurrent workers
+            enable_scheduler: Enable scheduler for scheduled tasks
+            persistent: Enable persistent storage
+            storage_path: Path for SQLite storage (if persistent)
+            history_size: Maximum execution history entries to keep per task
+        """
+        import heapq
+
+        self.max_workers = max_workers
+        self.enable_scheduler = enable_scheduler
+        self.persistent = persistent
+        self.storage_path = storage_path or ":memory:"
+        self.history_size = history_size
+
+        # Task registry
+        self._registered_tasks: dict[str, TaskManagerDefinition] = {}
+        self._task_name_to_id: dict[str, str] = {}
+
+        # Priority queue: (-priority, timestamp, execution_id)
+        self._queue: list = []
+        self._queue_lock = asyncio.Lock()
+
+        # Executions
+        self._executions: dict[str, TaskManagerExecution] = {}
+        self._execution_history: dict[str, list[TaskManagerExecution]] = {}
+
+        # Dead letter queue for failed tasks
+        self._dead_letter_queue: list[TaskManagerExecution] = []
+
+        # Worker pool
+        self._worker_semaphore: Optional[asyncio.Semaphore] = None
+        self._workers: list[asyncio.Task] = []
+        self._running = False
+
+        # Metrics
+        self._metrics: dict[str, dict] = {}
+
+        # Persistent storage
+        self._conn: Optional[sqlite3.Connection] = None
+        if persistent:
+            self._init_storage()
+
+        # Scheduler integration
+        self._scheduler: Optional[BackgroundTaskScheduler] = None
+
+    def _init_storage(self) -> None:
+        """Initialize persistent storage."""
+        self._conn = sqlite3.connect(self.storage_path, check_same_thread=False)
+        cursor = self._conn.cursor()
+
+        # Task definitions
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS task_definitions (
+                task_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                schedule TEXT,
+                priority INTEGER,
+                retries INTEGER,
+                timeout REAL,
+                dependencies TEXT
+            )
+            """
+        )
+
+        # Executions
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS task_executions (
+                execution_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                result TEXT,
+                error TEXT,
+                retry_count INTEGER
+            )
+            """
+        )
+
+        # Metrics
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS task_metrics (
+                task_id TEXT PRIMARY KEY,
+                total_executions INTEGER,
+                successful_executions INTEGER,
+                failed_executions INTEGER,
+                total_duration_ms REAL,
+                average_duration_ms REAL
+            )
+            """
+        )
+
+        self._conn.commit()
+
+    async def start(self) -> None:
+        """Start the task manager dispatcher."""
+        if self._running:
+            return
+
+        self._running = True
+        self._worker_semaphore = asyncio.Semaphore(self.max_workers)
+
+        # Start worker tasks
+        for i in range(self.max_workers):
+            worker = asyncio.create_task(self._worker_loop(i))
+            self._workers.append(worker)
+
+        logger.info(f"BackgroundTaskManager started with {self.max_workers} workers")
+
+    async def stop(self) -> None:
+        """Stop the task manager and cancel all running tasks."""
+        if not self._running:
+            return
+
+        self._running = False
+
+        # Cancel all workers
+        for worker in self._workers:
+            if not worker.done():
+                worker.cancel()
+
+        # Wait for workers to finish
+        await asyncio.gather(*self._workers, return_exceptions=True)
+        self._workers.clear()
+
+        # Close storage
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+        logger.info("BackgroundTaskManager stopped")
+
+    def register_task(
+        self,
+        name: str,
+        handler: Callable,
+        priority: int = 0,
+        retries: int = 3,
+        timeout: Optional[float] = None,
+        schedule: Optional[str] = None,
+    ) -> str:
+        """
+        Register a task with the manager.
+
+        Args:
+            name: Unique task name
+            handler: Callable to execute (sync or async)
+            priority: Priority (higher = higher priority)
+            retries: Max retry attempts
+            timeout: Timeout in seconds
+            schedule: Cron expression for scheduled tasks
+
+        Returns:
+            Task ID
+        """
+        task_id = str(uuid4())[:8]
+
+        task_def = TaskManagerDefinition(
+            id=task_id,
+            name=name,
+            handler=handler,
+            schedule=schedule,
+            priority=priority,
+            retries=retries,
+            timeout=timeout,
+        )
+
+        self._registered_tasks[task_id] = task_def
+        self._task_name_to_id[name] = task_id
+        self._metrics[task_id] = {
+            "total_executions": 0,
+            "successful_executions": 0,
+            "failed_executions": 0,
+            "total_duration_ms": 0.0,
+            "average_duration_ms": 0.0,
+        }
+
+        if self.persistent and self._conn:
+            cursor = self._conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO task_definitions
+                (task_id, name, schedule, priority, retries, timeout, dependencies)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    name,
+                    schedule,
+                    priority,
+                    retries,
+                    timeout,
+                    json.dumps(task_def.dependencies),
+                ),
+            )
+            self._conn.commit()
+
+        logger.info(f"Registered task '{name}' with ID {task_id}")
+        return task_id
+
+    async def enqueue(self, task_id: str, data: Any = None) -> str:
+        """
+        Enqueue a task for execution.
+
+        Args:
+            task_id: ID of registered task
+            data: Optional data to pass to handler
+
+        Returns:
+            Execution ID
+
+        Raises:
+            ValueError: If task_id not found
+        """
+        if task_id not in self._registered_tasks:
+            raise ValueError(f"Task {task_id} not registered")
+
+        execution_id = str(uuid4())
+        task_def = self._registered_tasks[task_id]
+
+        execution = TaskManagerExecution(
+            task_id=task_id,
+            execution_id=execution_id,
+            status=TaskManagerStatus.PENDING,
+            data=data,
+        )
+
+        self._executions[execution_id] = execution
+
+        # Add to priority queue
+        async with self._queue_lock:
+            import heapq
+            # Priority tuple: (-priority, timestamp, execution_id)
+            # Negative priority so higher values come first
+            heapq.heappush(
+                self._queue,
+                (-task_def.priority, datetime.now().timestamp(), execution_id),
+            )
+
+        logger.debug(
+            f"Enqueued task '{task_def.name}' (execution_id={execution_id}, "
+            f"priority={task_def.priority})"
+        )
+        return execution_id
+
+    def cancel_execution(self, execution_id: str) -> bool:
+        """
+        Cancel a pending execution.
+
+        Args:
+            execution_id: Execution ID to cancel
+
+        Returns:
+            True if cancelled, False if not found or already running
+        """
+        execution = self._executions.get(execution_id)
+        if not execution:
+            return False
+
+        if execution.status in (TaskManagerStatus.RUNNING, TaskManagerStatus.RETRYING):
+            return False
+
+        execution.status = TaskManagerStatus.CANCELLED
+        execution.completed_at = datetime.now()
+        return True
+
+    def get_execution(self, execution_id: str) -> Optional[TaskManagerExecution]:
+        """Get execution info by ID."""
+        return self._executions.get(execution_id)
+
+    def get_registered_tasks(self) -> list[dict]:
+        """Get list of all registered tasks."""
+        return [
+            {
+                "task_id": t.id,
+                "name": t.name,
+                "priority": t.priority,
+                "retries": t.retries,
+                "timeout": t.timeout,
+                "schedule": t.schedule,
+                "dependencies": t.dependencies,
+            }
+            for t in self._registered_tasks.values()
+        ]
+
+    def get_statistics(self) -> dict:
+        """Get current queue and worker statistics."""
+        active_executions = [
+            e for e in self._executions.values()
+            if e.status in (TaskManagerStatus.RUNNING, TaskManagerStatus.RETRYING)
+        ]
+
+        return {
+            "queue_depth": len(self._queue),
+            "active_workers": len(active_executions),
+            "max_workers": self.max_workers,
+            "total_executions": len(self._executions),
+            "pending": len([
+                e for e in self._executions.values()
+                if e.status == TaskManagerStatus.PENDING
+            ]),
+            "running": len([
+                e for e in self._executions.values()
+                if e.status == TaskManagerStatus.RUNNING
+            ]),
+            "completed": len([
+                e for e in self._executions.values()
+                if e.status == TaskManagerStatus.COMPLETED
+            ]),
+            "failed": len([
+                e for e in self._executions.values()
+                if e.status == TaskManagerStatus.FAILED
+            ]),
+            "dead_letter_queue_size": len(self._dead_letter_queue),
+        }
+
+    def get_metrics(self, task_id: str) -> Optional[dict]:
+        """Get metrics for a specific task."""
+        return self._metrics.get(task_id)
+
+    def get_dead_letter_queue(self) -> list[dict]:
+        """Get all failed executions in dead letter queue."""
+        return [e.to_dict() for e in self._dead_letter_queue]
+
+    def get_execution_history(self, task_id: str, limit: int = 100) -> list[dict]:
+        """Get execution history for a task."""
+        history = self._execution_history.get(task_id, [])
+        return [e.to_dict() for e in history[-limit:]]
+
+    def add_dependency(self, task_id: str, depends_on: str) -> bool:
+        """
+        Add a dependency relationship between tasks.
+
+        Args:
+            task_id: Task that depends
+            depends_on: Task that must complete first
+
+        Returns:
+            True if added, False if task not found
+        """
+        task = self._registered_tasks.get(task_id)
+        if not task:
+            return False
+
+        if depends_on not in task.dependencies:
+            task.dependencies.append(depends_on)
+
+        return True
+
+    async def _worker_loop(self, worker_id: int) -> None:
+        """Main worker loop that processes tasks from the queue."""
+        logger.debug(f"Worker {worker_id} started")
+
+        try:
+            while self._running:
+                # Get next task from queue
+                execution_id = await self._dequeue()
+                if not execution_id:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                execution = self._executions.get(execution_id)
+                if not execution or execution.status == TaskManagerStatus.CANCELLED:
+                    continue
+
+                task_def = self._registered_tasks.get(execution.task_id)
+                if not task_def:
+                    logger.error(f"Task definition not found: {execution.task_id}")
+                    continue
+
+                # Execute with retry logic
+                async with self._worker_semaphore:
+                    await self._execute_with_retry(task_def, execution)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Worker {worker_id} error: {e}")
+
+        logger.debug(f"Worker {worker_id} stopped")
+
+    async def _dequeue(self) -> Optional[str]:
+        """Dequeue next execution from priority queue."""
+        async with self._queue_lock:
+            import heapq
+            if not self._queue:
+                return None
+
+            _, _, execution_id = heapq.heappop(self._queue)
+            return execution_id
+
+    async def _execute_with_retry(
+        self,
+        task_def: TaskManagerDefinition,
+        execution: TaskManagerExecution,
+    ) -> None:
+        """Execute a task with retry logic."""
+        for attempt in range(task_def.retries + 1):
+            if execution.status == TaskManagerStatus.CANCELLED:
+                break
+
+            if attempt > 0:
+                execution.status = TaskManagerStatus.RETRYING
+                execution.retry_count = attempt
+                # Exponential backoff: 1s * 2^retry
+                backoff = 1.0 * (2 ** (attempt - 1))
+                logger.info(
+                    f"Retrying task '{task_def.name}' (attempt {attempt + 1}, "
+                    f"backoff={backoff}s)"
+                )
+                await asyncio.sleep(backoff)
+
+            execution.status = TaskManagerStatus.RUNNING
+            execution.started_at = datetime.now()
+
+            try:
+                # Execute handler
+                if asyncio.iscoroutinefunction(task_def.handler):
+                    if task_def.timeout:
+                        result = await asyncio.wait_for(
+                            task_def.handler(execution.data),
+                            timeout=task_def.timeout,
+                        )
+                    else:
+                        result = await task_def.handler(execution.data)
+                else:
+                    if task_def.timeout:
+                        result = await asyncio.wait_for(
+                            asyncio.to_thread(task_def.handler, execution.data),
+                            timeout=task_def.timeout,
+                        )
+                    else:
+                        result = await asyncio.to_thread(
+                            task_def.handler, execution.data
+                        )
+
+                # Success
+                execution.status = TaskManagerStatus.COMPLETED
+                execution.completed_at = datetime.now()
+                execution.result = result
+                execution.retry_count = attempt
+
+                self._update_metrics(task_def.id, execution, success=True)
+                self._add_to_history(task_def.id, execution)
+
+                logger.info(
+                    f"Task '{task_def.name}' completed successfully "
+                    f"(execution_id={execution.execution_id})"
+                )
+                return
+
+            except asyncio.TimeoutError:
+                error_msg = f"Task timed out after {task_def.timeout}s"
+                execution.error = error_msg
+                logger.warning(
+                    f"Task '{task_def.name}' timed out (attempt {attempt + 1})"
+                )
+
+            except Exception as e:
+                error_msg = str(e)
+                execution.error = error_msg
+                logger.warning(
+                    f"Task '{task_def.name}' failed: {error_msg} "
+                    f"(attempt {attempt + 1})"
+                )
+
+        # All retries exhausted
+        execution.status = TaskManagerStatus.FAILED
+        execution.completed_at = datetime.now()
+        execution.retry_count = task_def.retries
+
+        self._update_metrics(task_def.id, execution, success=False)
+        self._add_to_history(task_def.id, execution)
+        self._dead_letter_queue.append(execution)
+
+        logger.error(
+            f"Task '{task_def.name}' failed after {task_def.retries + 1} attempts "
+            f"(execution_id={execution.execution_id})"
+        )
+
+    def _update_metrics(
+        self,
+        task_id: str,
+        execution: TaskManagerExecution,
+        success: bool,
+    ) -> None:
+        """Update task metrics."""
+        metrics = self._metrics[task_id]
+        metrics["total_executions"] += 1
+
+        if success:
+            metrics["successful_executions"] += 1
+        else:
+            metrics["failed_executions"] += 1
+
+        if execution.started_at and execution.completed_at:
+            duration_ms = (
+                execution.completed_at - execution.started_at
+            ).total_seconds() * 1000
+            metrics["total_duration_ms"] += duration_ms
+            metrics["average_duration_ms"] = (
+                metrics["total_duration_ms"] / metrics["total_executions"]
+            )
+
+    def _add_to_history(
+        self,
+        task_id: str,
+        execution: TaskManagerExecution,
+    ) -> None:
+        """Add execution to history."""
+        if task_id not in self._execution_history:
+            self._execution_history[task_id] = []
+
+        history = self._execution_history[task_id]
+        history.append(execution)
+
+        # Trim history to max size
+        if len(history) > self.history_size:
+            self._execution_history[task_id] = history[-self.history_size:]

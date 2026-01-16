@@ -18,6 +18,8 @@ Integration points:
 - Publishes validation events to UniversalInbox
 """
 
+from __future__ import annotations
+
 import ast
 import asyncio
 import json
@@ -25,9 +27,9 @@ import logging
 import re
 import subprocess
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
 
@@ -401,6 +403,7 @@ class ShadowValidator:
             Language.JSON: JSONValidator(),
         }
         self.linter_runner = LinterRunner()
+        self.shadow_comparator = ShadowComparator()
 
     async def validate(
         self,
@@ -502,6 +505,100 @@ class ShadowValidator:
                 suggestions.append(warning.suggestion)
 
         return suggestions[:5]  # Limit to top 5 suggestions
+
+    # Shadow Comparison Methods (delegate to ShadowComparator)
+
+    def set_shadow(self, original_code: str) -> None:
+        """
+        Store shadow code for comparison.
+
+        Args:
+            original_code: Original source code to use as shadow
+        """
+        self.shadow_comparator.set_shadow(original_code)
+
+    def parse(self, source_code: str) -> ASTNode:
+        """
+        Parse source code to ASTNode tree.
+
+        Args:
+            source_code: Python source code to parse
+
+        Returns:
+            ASTNode representing the module root
+        """
+        return self.shadow_comparator.parse(source_code)
+
+    def validate_shadow(self, modified_code: str) -> ShadowValidationResult:
+        """
+        Compare modified code against shadow and detect mutations.
+
+        Args:
+            modified_code: Modified source code to validate
+
+        Returns:
+            ShadowValidationResult with violations, mutations, and warnings
+        """
+        return self.shadow_comparator.validate(modified_code)
+
+    def extract_signature(self, func_name: str, source: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract function signature from source code.
+
+        Args:
+            func_name: Name of function to extract
+            source: Source code containing the function
+
+        Returns:
+            Dictionary with function signature details or None if not found
+        """
+        return self.shadow_comparator.extract_signature(func_name, source)
+
+    def extract_call_chain(self, source: str) -> List[str]:
+        """
+        Extract method call chains from source code.
+
+        Args:
+            source: Source code to analyze
+
+        Returns:
+            List of method call chains (e.g., ["obj.method1().method2()"])
+        """
+        return self.shadow_comparator.extract_call_chain(source)
+
+    def extract_returns(self, func_name: str, source: str) -> List[str]:
+        """
+        Extract return statements from a function.
+
+        Args:
+            func_name: Name of function to analyze
+            source: Source code containing the function
+
+        Returns:
+            List of return statement strings
+        """
+        return self.shadow_comparator.extract_returns(func_name, source)
+
+    def detect_security_violations(self, code: str) -> List[str]:
+        """
+        Detect dangerous patterns in code.
+
+        Args:
+            code: Source code to analyze
+
+        Returns:
+            List of security violation descriptions
+        """
+        return self.shadow_comparator.detect_security_violations(code)
+
+    def generate_report(self) -> str:
+        """
+        Generate markdown report of shadow validation.
+
+        Returns:
+            Markdown formatted report string
+        """
+        return self.shadow_comparator.generate_report()
 
 
 class LinterRunner:
@@ -652,3 +749,428 @@ class LinterRunner:
                     warnings.append(item)
 
         return {"available": True, "errors": errors, "warnings": warnings}
+
+
+# Shadow Comparison Features
+
+
+class ASTNodeType(Enum):
+    """Types of AST nodes."""
+    MODULE = auto()
+    FUNCTION = auto()
+    CLASS = auto()
+    IMPORT = auto()
+    CALL = auto()
+    RETURN = auto()
+
+
+@dataclass
+class ASTNode:
+    """Represents a node in the abstract syntax tree."""
+    type: ASTNodeType
+    name: str
+    line_number: int
+    source: str
+    children: List["ASTNode"] = field(default_factory=list)
+
+
+@dataclass
+class ShadowValidationResult:
+    """Result of shadow validation comparing modified code against original."""
+    is_valid: bool
+    violations: List[str] = field(default_factory=list)
+    mutations: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+class ShadowComparator:
+    """Compares modified code against shadow (original) code to detect mutations."""
+
+    def __init__(self):
+        """Initialize shadow comparator."""
+        self.shadow_code: Optional[str] = None
+        self.shadow_ast: Optional[ASTNode] = None
+
+    def set_shadow(self, original_code: str) -> None:
+        """
+        Store shadow code for comparison.
+
+        Args:
+            original_code: Original source code to use as shadow
+        """
+        self.shadow_code = original_code
+        self.shadow_ast = self.parse(original_code)
+
+    def parse(self, source_code: str) -> ASTNode:
+        """
+        Parse source code to ASTNode tree.
+
+        Args:
+            source_code: Python source code to parse
+
+        Returns:
+            ASTNode representing the module root
+        """
+        try:
+            tree = ast.parse(source_code)
+            return self._build_ast_node(tree, source_code)
+        except SyntaxError as e:
+            logger.error(f"Failed to parse source code: {e}")
+            return ASTNode(
+                type=ASTNodeType.MODULE,
+                name="<error>",
+                line_number=0,
+                source=source_code,
+                children=[]
+            )
+
+    def _build_ast_node(self, node: ast.AST, source: str) -> ASTNode:
+        """Build ASTNode tree from ast.AST node."""
+        children = []
+
+        if isinstance(node, ast.Module):
+            ast_node = ASTNode(
+                type=ASTNodeType.MODULE,
+                name="<module>",
+                line_number=0,
+                source=source,
+                children=[]
+            )
+            for child in node.body:
+                children.append(self._build_ast_node(child, source))
+
+        elif isinstance(node, ast.FunctionDef):
+            lines = source.split("\n")
+            func_source = "\n".join(lines[node.lineno - 1:node.end_lineno if node.end_lineno else node.lineno])
+            ast_node = ASTNode(
+                type=ASTNodeType.FUNCTION,
+                name=node.name,
+                line_number=node.lineno,
+                source=func_source,
+                children=[]
+            )
+            for child in node.body:
+                children.append(self._build_ast_node(child, source))
+
+        elif isinstance(node, ast.ClassDef):
+            lines = source.split("\n")
+            class_source = "\n".join(lines[node.lineno - 1:node.end_lineno if node.end_lineno else node.lineno])
+            ast_node = ASTNode(
+                type=ASTNodeType.CLASS,
+                name=node.name,
+                line_number=node.lineno,
+                source=class_source,
+                children=[]
+            )
+            for child in node.body:
+                children.append(self._build_ast_node(child, source))
+
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            ast_node = ASTNode(
+                type=ASTNodeType.IMPORT,
+                name=ast.unparse(node) if hasattr(ast, 'unparse') else str(node),
+                line_number=getattr(node, 'lineno', 0),
+                source=ast.unparse(node) if hasattr(ast, 'unparse') else str(node),
+                children=[]
+            )
+
+        elif isinstance(node, ast.Return):
+            ast_node = ASTNode(
+                type=ASTNodeType.RETURN,
+                name="<return>",
+                line_number=getattr(node, 'lineno', 0),
+                source=ast.unparse(node) if hasattr(ast, 'unparse') else str(node),
+                children=[]
+            )
+
+        elif isinstance(node, ast.Call):
+            ast_node = ASTNode(
+                type=ASTNodeType.CALL,
+                name=ast.unparse(node.func) if hasattr(ast, 'unparse') else str(node.func),
+                line_number=getattr(node, 'lineno', 0),
+                source=ast.unparse(node) if hasattr(ast, 'unparse') else str(node),
+                children=[]
+            )
+
+        else:
+            # Generic node
+            ast_node = ASTNode(
+                type=ASTNodeType.MODULE,
+                name=node.__class__.__name__,
+                line_number=getattr(node, 'lineno', 0),
+                source=ast.unparse(node) if hasattr(ast, 'unparse') else str(node),
+                children=[]
+            )
+
+        ast_node.children = children
+        return ast_node
+
+    def validate(self, modified_code: str) -> ShadowValidationResult:
+        """
+        Compare modified code against shadow and detect mutations.
+
+        Args:
+            modified_code: Modified source code to validate
+
+        Returns:
+            ShadowValidationResult with violations, mutations, and warnings
+        """
+        result = ShadowValidationResult(is_valid=True)
+
+        if not self.shadow_code:
+            result.warnings.append("No shadow code set for comparison")
+            return result
+
+        # Parse modified code
+        modified_ast = self.parse(modified_code)
+
+        # Detect security violations
+        security_violations = self.detect_security_violations(modified_code)
+        result.violations.extend(security_violations)
+
+        # Compare ASTs
+        mutations = self._compare_asts(self.shadow_ast, modified_ast)
+        result.mutations.extend(mutations)
+
+        # Check for significant changes - mutations also make code invalid
+        if security_violations or mutations:
+            result.is_valid = False
+
+        return result
+
+    def _compare_asts(self, shadow: Optional[ASTNode], modified: ASTNode) -> List[str]:
+        """Compare two AST trees and return list of mutations."""
+        mutations = []
+
+        if not shadow:
+            return mutations
+
+        # Compare imports
+        shadow_imports = self._get_imports(shadow)
+        modified_imports = self._get_imports(modified)
+
+        for import_name in modified_imports:
+            if import_name not in shadow_imports:
+                mutations.append(f"Import '{import_name}' was added")
+
+        for import_name in shadow_imports:
+            if import_name not in modified_imports:
+                mutations.append(f"Import '{import_name}' was removed")
+
+        # Compare functions
+        shadow_funcs = self._get_functions(shadow)
+        modified_funcs = self._get_functions(modified)
+
+        # Check for removed functions
+        for func_name in shadow_funcs:
+            if func_name not in modified_funcs:
+                mutations.append(f"Function '{func_name}' was removed")
+
+        # Check for added functions
+        for func_name in modified_funcs:
+            if func_name not in shadow_funcs:
+                mutations.append(f"Function '{func_name}' was added")
+
+        # Check for modified functions
+        for func_name in shadow_funcs:
+            if func_name in modified_funcs:
+                shadow_func = shadow_funcs[func_name]
+                modified_func = modified_funcs[func_name]
+
+                # Compare function bodies
+                if shadow_func.source != modified_func.source:
+                    mutations.append(f"Function '{func_name}' was modified")
+
+        return mutations
+
+    def _get_functions(self, node: ASTNode) -> Dict[str, ASTNode]:
+        """Extract all functions from AST node."""
+        functions = {}
+
+        if node.type == ASTNodeType.FUNCTION:
+            functions[node.name] = node
+
+        for child in node.children:
+            functions.update(self._get_functions(child))
+
+        return functions
+
+    def _get_imports(self, node: ASTNode) -> Set[str]:
+        """Extract all imports from AST node."""
+        imports = set()
+
+        if node.type == ASTNodeType.IMPORT:
+            imports.add(node.name)
+
+        for child in node.children:
+            imports.update(self._get_imports(child))
+
+        return imports
+
+    def extract_signature(self, func_name: str, source: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract function signature from source code.
+
+        Args:
+            func_name: Name of function to extract
+            source: Source code containing the function
+
+        Returns:
+            Dictionary with function signature details or None if not found
+        """
+        try:
+            tree = ast.parse(source)
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                    # Extract parameters
+                    params = []
+                    for arg in node.args.args:
+                        param_info = {"name": arg.arg}
+                        if arg.annotation:
+                            param_info["type"] = ast.unparse(arg.annotation) if hasattr(ast, 'unparse') else str(arg.annotation)
+                        params.append(param_info)
+
+                    # Extract return type
+                    return_type = None
+                    if node.returns:
+                        return_type = ast.unparse(node.returns) if hasattr(ast, 'unparse') else str(node.returns)
+
+                    return {
+                        "name": func_name,
+                        "params": params,
+                        "return_type": return_type,
+                        "line": node.lineno,
+                    }
+
+        except SyntaxError as e:
+            logger.error(f"Failed to parse source for signature extraction: {e}")
+
+        return None
+
+    def extract_call_chain(self, source: str) -> List[str]:
+        """
+        Extract method call chains from source code.
+
+        Args:
+            source: Source code to analyze
+
+        Returns:
+            List of method call chains (e.g., ["obj.method1().method2()"])
+        """
+        call_chains = []
+
+        try:
+            tree = ast.parse(source)
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    chain = ast.unparse(node) if hasattr(ast, 'unparse') else str(node)
+                    # Check if it's a chained call (contains multiple dots)
+                    if chain.count('.') > 1:
+                        call_chains.append(chain)
+
+        except SyntaxError as e:
+            logger.error(f"Failed to parse source for call chain extraction: {e}")
+
+        return call_chains
+
+    def extract_returns(self, func_name: str, source: str) -> List[str]:
+        """
+        Extract return statements from a function.
+
+        Args:
+            func_name: Name of function to analyze
+            source: Source code containing the function
+
+        Returns:
+            List of return statement strings
+        """
+        returns = []
+
+        try:
+            tree = ast.parse(source)
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                    # Walk through function body
+                    for child in ast.walk(node):
+                        if isinstance(child, ast.Return):
+                            return_str = ast.unparse(child) if hasattr(ast, 'unparse') else str(child)
+                            returns.append(return_str)
+
+        except SyntaxError as e:
+            logger.error(f"Failed to parse source for return extraction: {e}")
+
+        return returns
+
+    def detect_security_violations(self, code: str) -> List[str]:
+        """
+        Detect dangerous patterns in code.
+
+        Args:
+            code: Source code to analyze
+
+        Returns:
+            List of security violation descriptions
+        """
+        violations = []
+
+        # Pattern matching for dangerous functions
+        dangerous_patterns = [
+            (r'\bos\.system\s*\(', "os.system() detected - potential command injection risk"),
+            (r'\beval\s*\(', "eval() detected - code execution risk"),
+            (r'\bexec\s*\(', "exec() detected - code execution risk"),
+            (r'\b__import__\s*\(', "__import__() detected - dynamic import risk"),
+            (r'\bpickle\.loads\s*\(', "pickle.loads() detected - deserialization risk"),
+            (r'\bsubprocess\.call\s*\([^,]*shell\s*=\s*True', "subprocess with shell=True - command injection risk"),
+            (r'\bopen\s*\([^,]*["\']w["\']', "file write operation detected - verify file path safety"),
+        ]
+
+        for pattern, message in dangerous_patterns:
+            if re.search(pattern, code):
+                violations.append(message)
+
+        # Check for SQL injection patterns
+        if re.search(r'execute\s*\([^)]*\+', code):
+            violations.append("String concatenation in SQL execute() - SQL injection risk")
+
+        # Check for hardcoded secrets
+        if re.search(r'(?i)(password|api_?key|secret|token)\s*=\s*["\'][^"\']+["\']', code):
+            violations.append("Hardcoded secret detected - use environment variables")
+
+        return violations
+
+    def generate_report(self) -> str:
+        """
+        Generate markdown report of shadow validation.
+
+        Returns:
+            Markdown formatted report string
+        """
+        if not self.shadow_code:
+            return "# Shadow Validation Report\n\nNo shadow code set.\n"
+
+        report = ["# Shadow Validation Report\n"]
+
+        # Summary
+        report.append("## Summary\n")
+        report.append(f"- Shadow code lines: {len(self.shadow_code.splitlines())}\n")
+
+        # Functions
+        shadow_funcs = self._get_functions(self.shadow_ast) if self.shadow_ast else {}
+        report.append(f"- Functions in shadow: {len(shadow_funcs)}\n")
+
+        if shadow_funcs:
+            report.append("\n## Functions\n")
+            for func_name, func_node in shadow_funcs.items():
+                report.append(f"- `{func_name}` (line {func_node.line_number})\n")
+
+        # Security check
+        violations = self.detect_security_violations(self.shadow_code)
+        if violations:
+            report.append("\n## Security Violations\n")
+            for violation in violations:
+                report.append(f"- {violation}\n")
+
+        return "".join(report)
