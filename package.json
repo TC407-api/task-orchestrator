@@ -23,7 +23,9 @@
   "mcp": {
     "server": {
       "command": "python",
-      "args": ["mcp_server.py"],
+      "args": [
+        "mcp_server.py"
+      ],
       "cwd": "."
     },
     "tools": 44,
@@ -37,5 +39,8 @@
   },
   "engines": {
     "python": ">=3.10"
+  },
+  "devDependencies": {
+    "pako": "^2.1.0"
   }
 }
