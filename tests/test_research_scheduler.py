@@ -9,14 +9,11 @@ Tests the research module including:
 - ResearchToolHandler: MCP tool handling
 """
 
-import json
 import pytest
-import tempfile
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-from src.research.scheduler import TopicRegistry, ResearchScheduler, ScheduleConfig
+from src.research.scheduler import TopicRegistry, ResearchScheduler
 from src.research.runner import ResearchRunner
 from src.research.summarizer import ResearchSummarizer
 from src.research.primer import ContextPrimer
@@ -213,7 +210,7 @@ class TestContextPrimer:
     def test_init_creates_directory(self, tmp_path):
         """Test initialization creates the base directory."""
         path = tmp_path / "research"
-        primer = ContextPrimer(base_path=str(path))
+        ContextPrimer(base_path=str(path))  # Side effect: creates directory
         assert path.exists()
 
     def test_generate_context_file(self, tmp_path):
