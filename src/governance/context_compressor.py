@@ -1,7 +1,7 @@
 """Context window compression using SVD for 90% fidelity at 20% size."""
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
 

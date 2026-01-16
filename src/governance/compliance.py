@@ -1,10 +1,10 @@
 """Compliance report generation for SOC2, HIPAA, and ISO27001."""
 import json
 import re
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 
 class ComplianceFramework(Enum):

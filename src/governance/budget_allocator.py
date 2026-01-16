@@ -1,6 +1,6 @@
 """Department/project budget allocation and chargeback reporting."""
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Dict, Tuple
 from datetime import datetime
 

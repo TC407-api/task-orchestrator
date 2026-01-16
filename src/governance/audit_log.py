@@ -1,7 +1,7 @@
 """Immutable audit logging with cryptographic integrity (SHA256 chain)."""
 import json
 import hashlib
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any

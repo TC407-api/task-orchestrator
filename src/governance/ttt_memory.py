@@ -9,7 +9,6 @@ from typing import List, Optional, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 # Import FailurePattern from existing context
-from src.evaluation.immune_system.failure_store import FailurePattern
 
 
 class TTTMemoryLayer:

@@ -1,7 +1,7 @@
 import pytest
 import time
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from typing import List
 
 # Assumed import based on existing context

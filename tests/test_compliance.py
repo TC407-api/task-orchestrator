@@ -6,8 +6,7 @@ from typing import List, Dict, Any
 
 from src.governance.compliance import (
     ReportGenerator,
-    ComplianceFramework,
-    ComplianceReport
+    ComplianceFramework
 )
 
 @pytest.fixture

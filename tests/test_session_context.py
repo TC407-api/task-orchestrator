@@ -1,9 +1,7 @@
 import pytest
 import json
 import time
-from pathlib import Path
-from datetime import datetime, timedelta
-from src.governance.session_context import SessionManager, SessionContext
+from src.governance.session_context import SessionManager
 
 
 # Fixture to prevent writing to real user home directory during tests
