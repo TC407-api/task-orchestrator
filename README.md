@@ -11,6 +11,8 @@ A production-grade MCP (Model Context Protocol) server for orchestrating AI agen
 - **Task Management** - Create, schedule, and track tasks from email/calendar
 - **Evaluation System** - Quality gates, failure detection, and training data export
 - **Immune System** - Learn from failures and prevent recurrence
+- **Dynamic Tool Loading** - Lazy load tool categories to reduce context window usage (88% reduction)
+- **Human-in-the-Loop Controls** - Operation classification for safe, approval-required, and blocked actions
 
 ## Installation
 
@@ -54,6 +56,7 @@ JWT_SECRET_KEY=test123 python -m pytest tests/ -v
 | `healing_status` | Check self-healing system status |
 | `immune_status` | Check immune system health |
 | `immune_dashboard` | View failure patterns and trends |
+| `request_tool` | Dynamically load tool categories (for context optimization) |
 
 ## Evaluation System
 
@@ -62,28 +65,38 @@ The evaluation system provides quality gates for agent outputs, catching semanti
 ### Components
 
 ```
-src/evaluation/
-├── trial.py              # Trial schema and lifecycle
-├── graders/              # Code and model-based validators
-│   ├── code.py           # JSON, regex, length validators
-│   └── model.py          # LLM-as-judge graders
-├── immune_system/        # Self-learning failure prevention
-│   ├── core.py           # ImmuneSystem singleton
-│   ├── failure_store.py  # Pattern storage
-│   ├── pattern_matcher.py# Similarity matching
-│   ├── guardrails.py     # Prompt protection
-│   ├── dashboard.py      # Health metrics
-│   └── federation.py     # Cross-project sharing
-├── alerting/             # High-risk pattern detection
-│   ├── manager.py        # Alert coordination
-│   ├── rules.py          # Alert rule types
-│   └── notifiers.py      # Console/Webhook/Slack
-├── prediction/           # ML-based failure prediction
-│   ├── features.py       # TF-IDF + meta features
-│   ├── classifier.py     # RandomForest predictor
-│   └── training.py       # Model training pipeline
-├── langfuse_integration.py # Observability tracing
-└── export.py             # Training data export
+src/
+├── mcp/
+│   ├── server.py         # MCP server with 41 tools
+│   ├── tool_router.py    # Dynamic tool loading
+│   └── context_tracker.py# Context window monitoring
+├── agents/
+│   ├── operation_classifier.py # HITL operation classification
+│   ├── inbox.py          # Universal approval queue
+│   └── ...
+├── evaluation/
+│   ├── trial.py          # Trial schema and lifecycle
+│   ├── graders/          # Code and model-based validators
+│   │   ├── code.py       # JSON, regex, length validators
+│   │   └── model.py      # LLM-as-judge graders
+│   ├── immune_system/    # Self-learning failure prevention
+│   │   ├── core.py       # ImmuneSystem singleton
+│   │   ├── failure_store.py  # Pattern storage
+│   │   ├── pattern_matcher.py# Similarity matching
+│   │   ├── guardrails.py # Prompt protection
+│   │   ├── dashboard.py  # Health metrics
+│   │   └── federation.py # Cross-project sharing
+│   ├── alerting/         # High-risk pattern detection
+│   │   ├── manager.py    # Alert coordination
+│   │   ├── rules.py      # Alert rule types
+│   │   └── notifiers.py  # Console/Webhook/Slack
+│   ├── prediction/       # ML-based failure prediction
+│   │   ├── features.py   # TF-IDF + meta features
+│   │   ├── classifier.py # RandomForest predictor
+│   │   └── training.py   # Model training pipeline
+│   ├── langfuse_integration.py # Observability tracing
+│   └── export.py         # Training data export
+└── ...
 ```
 
 ### Graders
@@ -186,6 +199,53 @@ if result.is_high_risk:
     print(f"Warning: {result.risk_score:.0%} failure probability")
 ```
 
+## Dynamic Tool Loading
+
+Reduce context window usage by 88% through lazy loading of tool categories. When context is low, only core tools are exposed; other categories are loaded on demand via `request_tool`.
+
+### Tool Categories
+
+| Category | Tools | Use Case |
+|----------|-------|----------|
+| `core` | tasks_list, tasks_add, spawn_agent, healing_status, request_tool | Always available |
+| `task` | tasks_sync_email, tasks_schedule, tasks_complete, tasks_analyze, tasks_briefing | Task management |
+| `agent` | spawn_parallel_agents, spawn_archetype_agent, inbox_status, approve_action | Agent coordination |
+| `immune` | immune_status, immune_check, immune_failures, immune_dashboard, immune_sync | Health monitoring |
+| `federation` | federation_status, federation_subscribe, federation_search, federation_decay | Cross-project patterns |
+| `sync` | sync_status, sync_trigger, sync_alerts | Real-time sync |
+| `workflow` | trigger_workflow, list_workflows, validate_code, run_with_error_capture | Workflow automation |
+| `cost` | cost_summary, cost_set_budget | Budget management |
+
+### Usage
+
+```python
+# Load a tool category dynamically
+result = await mcp_server.handle_tool_call("request_tool", {
+    "category": "immune",
+    "reason": "Need to check system health"
+})
+
+# Result includes loaded tools
+# {"success": true, "tools_loaded": ["immune_status", "immune_check", ...]}
+```
+
+### Context Tracking
+
+The `ContextTracker` monitors context window usage:
+- Default max: 200,000 tokens
+- Threshold: 10% remaining triggers dynamic mode
+- Token estimation with caching for tool definitions
+
+### Operation Classification (HITL)
+
+The `OperationClassifier` categorizes operations for human-in-the-loop controls:
+
+| Category | Behavior | Examples |
+|----------|----------|----------|
+| SAFE | Auto-execute | tasks_list, file_read, cost_summary |
+| REQUIRES_APPROVAL | Wait for human | file_delete, email_send, deployment |
+| BLOCKED | Never execute | rm -rf /, DROP DATABASE, force push main |
+
 ## Self-Healing System
 
 Automatic recovery with circuit breakers and exponential backoff:
@@ -236,7 +296,8 @@ python -m pytest tests/ --cov=src --cov-report=html
 - Immune system tests: 22
 - CI/CD integration tests: 19
 - Phase 8 tests: 25
-- **Total: 103 tests**
+- Dynamic tool loading tests: 26
+- **Total: 129 tests**
 
 ## CI/CD
 
@@ -256,44 +317,56 @@ Environment variables:
 | `GEMINI_API_KEY` | Google Gemini API key | Yes |
 | `LANGFUSE_SECRET_KEY` | Langfuse observability | No |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key | No |
-| `GRAPHITI_URI` | Neo4j connection for Graphiti | No |
+| `LANGFUSE_HOST` | Langfuse server URL | No (default: localhost:3000) |
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Phase 10 Observability](docs/phase10-observability.md) | Langfuse + Graphiti integration architecture |
+| [PRD: Eval System](docs/PRD-eval-system.md) | Product requirements for evaluation system |
 
 ## Architecture
 
 ```
-Agent Request
-     │
-     ▼
-┌─────────────────────────────────────────────────────────┐
-│                    MCP Server                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
-│  │ spawn_agent │  │  parallel   │  │ task management │  │
-│  │   handler   │  │   agents    │  │     tools       │  │
-│  └──────┬──────┘  └──────┬──────┘  └────────┬────────┘  │
-│         │                │                   │           │
-│         ▼                ▼                   ▼           │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │              Evaluation System                   │    │
-│  │  ┌─────────┐  ┌─────────┐  ┌──────────────────┐ │    │
-│  │  │ Graders │  │ Immune  │  │    Alerting      │ │    │
-│  │  │         │  │ System  │  │                  │ │    │
-│  │  └────┬────┘  └────┬────┘  └────────┬─────────┘ │    │
-│  │       │            │                 │           │    │
-│  │       ▼            ▼                 ▼           │    │
-│  │  ┌─────────────────────────────────────────┐    │    │
-│  │  │         Langfuse Observability          │    │    │
-│  │  └─────────────────────────────────────────┘    │    │
-│  └─────────────────────────────────────────────────┘    │
-│                          │                               │
-│  ┌───────────────────────┴───────────────────────────┐  │
-│  │              Self-Healing System                   │  │
-│  │  Circuit Breaker │ Retry Logic │ Cost Management   │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-                   Gemini API / Graphiti
+                         Claude Code
+                              │
+           ┌──────────────────┼──────────────────┐
+           │                  │                  │
+           ▼                  ▼                  ▼
+    ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+    │  Graphiti   │   │    Task     │   │   Memory    │
+    │ MCP Server  │   │Orchestrator │   │ MCP Server  │
+    │             │   │ MCP Server  │   │             │
+    └──────┬──────┘   └──────┬──────┘   └─────────────┘
+           │                 │
+           ▼                 ▼
+    ┌──────────────┐  ┌─────────────────────────────────┐
+    │    Neo4j     │  │        Evaluation System        │
+    │  Graph DB    │  │  Graders │ Immune │ Alerting   │
+    │  :7687       │  │          │ System │            │
+    └──────────────┘  └──────────────┬──────────────────┘
+                                     │
+                      ┌──────────────┴──────────────┐
+                      │                             │
+                      ▼                             ▼
+               ┌─────────────┐              ┌─────────────┐
+               │  Langfuse   │              │ Self-Healing│
+               │   (SDK)     │              │   System    │
+               │ :3000       │              │             │
+               └─────────────┘              └──────┬──────┘
+                                                   │
+                                                   ▼
+                                            ┌─────────────┐
+                                            │ Gemini API  │
+                                            └─────────────┘
 ```
+
+**Integration Methods:**
+- **Langfuse**: Python SDK with `@trace_*` decorators (automatic tracing)
+- **Graphiti**: MCP tools from Claude Code (pattern storage/retrieval)
+
+See [Phase 10 Observability](docs/phase10-observability.md) for detailed architecture.
 
 ## License
 

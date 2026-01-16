@@ -24,13 +24,15 @@ from ..agents.inbox import (
 )
 from ..agents.terminal_loop import TerminalListener, ErrorCapture, StackTraceParser
 from ..agents.shadow_validator import ShadowValidator, ValidationResult
-from ..agents.workflows import WorkflowRegistry, WorkflowTrigger
+from ..agents.workflows import WorkflowRegistry, WorkflowTrigger, WorkflowExecutor
 from ..agents.background_tasks import BackgroundTaskScheduler, ScheduledTask, TaskScheduleType
 from ..observability import trace_operation
 from ..self_healing import (
     CircuitBreaker,
     get_healing_status,
 )
+from .tool_router import ToolRouter, ToolCategory, TOOL_CATEGORIES
+from .context_tracker import ContextTracker
 
 
 class TaskOrchestratorMCP:
@@ -69,6 +71,44 @@ class TaskOrchestratorMCP:
         self._shadow_validator = ShadowValidator()
         self._workflow_registry = WorkflowRegistry()
         self._background_scheduler: Optional[BackgroundTaskScheduler] = None
+
+        # Federation components (Phase 9)
+        self._federation = None
+        self._graphiti_client = None
+        self._registry = None
+
+        # Dynamic tool loading components (Phase 10)
+        self._context_tracker = ContextTracker()
+        self._tool_router: Optional[ToolRouter] = None  # Initialized after get_tools() first call
+
+    async def _get_federation(self):
+        """
+        Get or create the PatternFederation with Graphiti client.
+
+        Returns:
+            PatternFederation instance with connected Graphiti client
+        """
+        if self._federation is not None:
+            return self._federation
+
+        from ..evaluation.immune_system import PatternFederation, get_registry_manager
+        from ..evaluation.immune_system.graphiti_client import create_graphiti_client
+
+        # Initialize registry
+        if self._registry is None:
+            self._registry = get_registry_manager()
+
+        # Create Graphiti client for federation
+        if self._graphiti_client is None:
+            self._graphiti_client = create_graphiti_client()
+
+        # Create federation with Graphiti client
+        self._federation = PatternFederation(
+            graphiti_client=self._graphiti_client,
+            local_group_id="project_task_orchestrator",
+        )
+
+        return self._federation
 
     async def initialize(self):
         """Initialize the coordinator with agents."""
@@ -749,6 +789,26 @@ class TaskOrchestratorMCP:
                     "required": ["task_id"],
                 },
             },
+            # Dynamic tool loading (Phase 10)
+            {
+                "name": "request_tool",
+                "description": "Load additional tool categories dynamically. Use when you need tools beyond the core set. Categories: task, agent, immune, federation, sync, workflow, cost.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["task", "agent", "immune", "federation", "sync", "workflow", "cost"],
+                            "description": "Tool category to load",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why you need these tools (for audit trail)",
+                        },
+                    },
+                    "required": ["category"],
+                },
+            },
         ]
 
     async def handle_tool_call(self, name: str, arguments: dict) -> Any:
@@ -799,6 +859,8 @@ class TaskOrchestratorMCP:
             "schedule_task": self._handle_schedule_task,
             "list_scheduled_tasks": self._handle_list_scheduled_tasks,
             "cancel_scheduled_task": self._handle_cancel_scheduled_task,
+            # Dynamic tool loading (Phase 10)
+            "request_tool": self._handle_request_tool,
         }
 
         handler = handlers.get(name)
@@ -1228,30 +1290,21 @@ class TaskOrchestratorMCP:
     @trace_operation("federation_status")
     async def _handle_federation_status(self, args: dict) -> dict:
         """Get federation status across portfolio projects."""
-        from ..evaluation.immune_system import (
-            get_registry_manager,
-            PatternFederation,
-            get_decay_system,
-        )
+        from ..evaluation.immune_system import get_decay_system
 
-        # Get or create registry (lazy singleton)
-        if not hasattr(self, '_registry'):
-            self._registry = get_registry_manager()
-
-        # Get or create federation
-        if not hasattr(self, '_federation'):
-            self._federation = PatternFederation(
-                graphiti_client=None,  # Will be set if available
-                local_group_id="project_task_orchestrator",
-            )
-
+        # Get federation with Graphiti client
+        federation = await self._get_federation()
         include_projects = args.get("include_projects", False)
+
+        # Check if Graphiti client is connected
+        graphiti_status = "connected" if self._graphiti_client else "not configured"
 
         result = {
             "success": True,
             "registry": self._registry.get_stats(),
-            "federation": self._federation.get_stats(),
+            "federation": federation.get_stats(),
             "decay": get_decay_system().get_stats(),
+            "graphiti_status": graphiti_status,
         }
 
         if include_projects:
@@ -1264,23 +1317,10 @@ class TaskOrchestratorMCP:
     @trace_operation("federation_subscribe")
     async def _handle_federation_subscribe(self, args: dict) -> dict:
         """Subscribe to another project's patterns."""
-        from ..evaluation.immune_system import (
-            get_registry_manager,
-            PatternFederation,
-        )
-
         project_id = args["project_id"]
 
-        # Get or create registry
-        if not hasattr(self, '_registry'):
-            self._registry = get_registry_manager()
-
-        # Get or create federation
-        if not hasattr(self, '_federation'):
-            self._federation = PatternFederation(
-                graphiti_client=None,
-                local_group_id="project_task_orchestrator",
-            )
+        # Get federation with Graphiti client
+        federation = await self._get_federation()
 
         # Check if project exists
         project = await self._registry.get_project(project_id)
@@ -1292,7 +1332,7 @@ class TaskOrchestratorMCP:
             }
 
         # Subscribe via federation
-        result = await self._federation.subscribe_to_project(project.group_id)
+        result = await federation.subscribe_to_project(project.group_id)
 
         # Update local project subscriptions
         local_project = await self._registry.get_project("task-orchestrator")
@@ -1303,26 +1343,20 @@ class TaskOrchestratorMCP:
             "success": True,
             "subscribed_to": project_id,
             "group_id": project.group_id,
-            "total_subscriptions": len(self._federation.subscriptions),
+            "total_subscriptions": len(federation.subscriptions),
         }
 
     @trace_operation("federation_search")
     async def _handle_federation_search(self, args: dict) -> dict:
         """Search patterns across federated projects."""
-        from ..evaluation.immune_system import PatternFederation
-
         query = args["query"]
         limit = args.get("limit", 10)
 
-        # Get or create federation
-        if not hasattr(self, '_federation'):
-            self._federation = PatternFederation(
-                graphiti_client=None,
-                local_group_id="project_task_orchestrator",
-            )
+        # Get federation with Graphiti client
+        federation = await self._get_federation()
 
         try:
-            results = await self._federation.search_global_patterns(query, limit)
+            results = await federation.search_global_patterns(query, limit)
 
             return {
                 "success": True,
@@ -1560,7 +1594,17 @@ class TaskOrchestratorMCP:
 
         model = args.get("model", "gemini-3-flash-preview")
         original_prompt = args["prompt"]
-        system_prompt = args.get("system_prompt", "You are an expert code assistant. Provide clear, working code solutions.")
+        system_prompt = args.get("system_prompt", """You are an expert code assistant. Provide clear, working code solutions.
+
+CRITICAL - SELF-VALIDATION REQUIRED:
+Before claiming any task is complete, you MUST validate your work:
+1. Run tests (npm test, pytest, go test, cargo test)
+2. Run build (npm run build, cargo build, go build)
+3. Run type check if applicable (npx tsc --noEmit, mypy)
+
+If ANY validation fails, fix the issue and re-run until all pass.
+NEVER say "done" without showing passing validation output.
+NEVER say "should work" - RUN IT and show the output.""")
         max_tokens = args.get("max_tokens", 8192)
 
         # Immune System: Pre-spawn check
@@ -1689,7 +1733,17 @@ class TaskOrchestratorMCP:
 
         prompts = args["prompts"]
         model = args.get("model", "gemini-3-flash-preview")
-        system_prompt = args.get("system_prompt", "You are an expert code assistant. Provide clear, working code solutions.")
+        system_prompt = args.get("system_prompt", """You are an expert code assistant. Provide clear, working code solutions.
+
+CRITICAL - SELF-VALIDATION REQUIRED:
+Before claiming any task is complete, you MUST validate your work:
+1. Run tests (npm test, pytest, go test, cargo test)
+2. Run build (npm run build, cargo build, go build)
+3. Run type check if applicable (npx tsc --noEmit, mypy)
+
+If ANY validation fails, fix the issue and re-run until all pass.
+NEVER say "done" without showing passing validation output.
+NEVER say "should work" - RUN IT and show the output.""")
         max_tokens = args.get("max_tokens", 8192)
 
         # Get immune system instance for all agents
@@ -2248,30 +2302,39 @@ class TaskOrchestratorMCP:
         target_files = args.get("target_files", [])
 
         try:
-            # Get workflow
-            workflow = self._workflow_registry.get_workflow(workflow_name)
+            # Get workflow - convert "refactor" to "@Refactor" format
+            trigger_name = f"@{workflow_name.capitalize()}"
+            if workflow_name == "testgen":
+                trigger_name = "@TestGen"
+            workflow = self._workflow_registry.get(trigger_name)
             if not workflow:
                 return {
                     "success": False,
                     "error": f"Unknown workflow: {workflow_name}",
-                    "available": list(self._workflow_registry.list_workflows().keys()),
+                    "available": [wf.trigger for wf in self._workflow_registry.list_workflows()],
                 }
 
-            # Process prompt through workflow
+            # Process prompt through workflow trigger
             trigger = WorkflowTrigger(registry=self._workflow_registry)
-            context = await trigger.prepare_context(
-                prompt=prompt,
-                workflow=workflow,
-                target_files=target_files,
+
+            # Add the trigger to the prompt if not present
+            trigger_prompt = f"{trigger_name} {prompt}" if trigger_name not in prompt else prompt
+
+            # Process and get context
+            result = trigger.process_prompt(
+                prompt=trigger_prompt,
+                base_path=".",
+                include_context=True,
             )
 
             return {
                 "success": True,
                 "workflow": workflow_name,
                 "archetype": workflow.archetype,
-                "expanded_prompt": context.expanded_prompt,
-                "system_prompt_addition": context.system_prompt_addition,
-                "loaded_files": context.loaded_files,
+                "expanded_prompt": result["processed_prompt"],
+                "system_prompt_addition": workflow.system_prompt_addition,
+                "triggers_detected": result["triggers"],
+                "context_injected": result["context_injected"],
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -2283,12 +2346,13 @@ class TaskOrchestratorMCP:
         return {
             "success": True,
             "workflows": {
-                name: {
+                wf.trigger: {
                     "trigger": wf.trigger,
-                    "description": wf.description,
                     "archetype": wf.archetype,
+                    "max_context_tokens": wf.max_context_tokens,
+                    "priority": wf.priority,
                 }
-                for name, wf in workflows.items()
+                for wf in workflows
             },
         }
 
@@ -2362,6 +2426,47 @@ class TaskOrchestratorMCP:
             return {"success": True, "task_id": task_id, "status": "cancelled"}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    @trace_operation("request_tool")
+    async def _handle_request_tool(self, args: dict) -> dict:
+        """
+        Load a tool category dynamically.
+
+        This enables lazy loading of tools to reduce context window usage.
+        When context is low (<10%), only core tools are exposed.
+        Use this to load additional categories as needed.
+        """
+        category = args.get("category", "")
+        reason = args.get("reason", "No reason provided")
+
+        # Initialize tool router if needed
+        if self._tool_router is None:
+            all_tools = self.get_tools()
+            self._tool_router = ToolRouter(all_tools=all_tools)
+
+        try:
+            # Load the category
+            loaded_tools = self._tool_router.request_tool(category)
+
+            # Get tool names for response
+            tool_names = [t.get("name", "unknown") for t in loaded_tools]
+
+            return {
+                "success": True,
+                "category": category,
+                "tools_loaded": tool_names,
+                "count": len(tool_names),
+                "reason_logged": reason,
+                "loaded_categories": list(
+                    cat.value for cat in self._tool_router.get_loaded_categories()
+                ),
+            }
+        except ValueError as e:
+            return {
+                "success": False,
+                "error": f"Invalid category: {category}",
+                "available_categories": ["task", "agent", "immune", "federation", "sync", "workflow", "cost"],
+            }
 
 
 async def run_mcp_server():
