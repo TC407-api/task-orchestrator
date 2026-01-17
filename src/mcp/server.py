@@ -2468,13 +2468,49 @@ NEVER say "should work" - RUN IT and show the output.""")
                 inbox=self._universal_inbox
             )
 
+        # SECURITY: Whitelist allowed commands to prevent injection
+        ALLOWED_COMMANDS = {
+            "npm", "npx", "node", "python", "python3", "pytest", "pip",
+            "git", "echo", "ls", "dir", "cat", "head", "tail", "grep",
+            "curl", "wget", "docker", "docker-compose",
+        }
+
         try:
             schedule_type = TaskScheduleType(schedule_type_str.upper())
 
-            # Create a command runner function
+            # SECURITY: Parse command safely and validate
+            import shlex
+            import subprocess
+
+            # Parse command into list (handles quoted strings properly)
+            try:
+                cmd_parts = shlex.split(command)
+            except ValueError as e:
+                return {"success": False, "error": f"Invalid command syntax: {e}"}
+
+            if not cmd_parts:
+                return {"success": False, "error": "Empty command"}
+
+            # Validate the base command is whitelisted
+            base_cmd = cmd_parts[0].lower()
+            # Handle paths like /usr/bin/python -> python
+            base_cmd = base_cmd.split("/")[-1].split("\\")[-1]
+
+            if base_cmd not in ALLOWED_COMMANDS:
+                return {
+                    "success": False,
+                    "error": f"Command '{base_cmd}' not in allowed list: {sorted(ALLOWED_COMMANDS)}"
+                }
+
+            # Create a safe command runner function (no shell=True)
             async def run_command():
-                import subprocess
-                result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                result = subprocess.run(
+                    cmd_parts,
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
                 return {"stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
 
             task = ScheduledTask(

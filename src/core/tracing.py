@@ -23,17 +23,34 @@ try:
     from langfuse import Langfuse
     from langfuse.decorators import observe as langfuse_observe
 
-    # Initialize Langfuse client
-    langfuse = Langfuse(
-        public_key=os.getenv("LANGFUSE_PUBLIC_KEY", "pk-lf-e4acdb77-1e22-4a75-ac49-f44dc85c6ba7"),
-        secret_key=os.getenv("LANGFUSE_SECRET_KEY", "sk-lf-ecb05847-f7c6-4ed5-9298-72ab4252c096"),
-        host=os.getenv("LANGFUSE_HOST", "http://localhost:3000")
-    )
+    # SECURITY: Require env vars - no hardcoded fallback secrets
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    host = os.getenv("LANGFUSE_HOST", "http://localhost:3000")
 
-    # Re-export observe decorator
-    observe = langfuse_observe
+    if public_key and secret_key:
+        # Initialize Langfuse client only if credentials provided
+        langfuse = Langfuse(
+            public_key=public_key,
+            secret_key=secret_key,
+            host=host
+        )
+        # Re-export observe decorator
+        observe = langfuse_observe
+        TRACING_ENABLED = True
+    else:
+        # Missing credentials - disable tracing
+        langfuse = None
+        TRACING_ENABLED = False
 
-    TRACING_ENABLED = True
+        def observe(name=None, **kwargs):
+            """No-op decorator when credentials not configured."""
+            def decorator(func):
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    return func(*args, **kwargs)
+                return wrapper
+            return decorator
 
 except ImportError:
     # Langfuse not installed - provide no-op fallback
