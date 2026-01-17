@@ -1,12 +1,7 @@
 """Tests for OperationClassifier - TDD RED phase."""
-import pytest
 from src.agents.operation_classifier import (
     OperationClassifier,
     OperationCategory,
-    OperationClassification,
-    BLOCKED_PATTERNS,
-    APPROVAL_REQUIRED,
-    SAFE_OPERATIONS,
 )
 
 

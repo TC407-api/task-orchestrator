@@ -251,7 +251,7 @@ class PatternSyncClient:
         if not self._ws:
             return
 
-        msg = SyncMessage(
+        SyncMessage(
             type=SyncEventType.SUBSCRIBE,
             payload={"project_id": target_project_id}
         )

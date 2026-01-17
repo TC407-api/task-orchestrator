@@ -1,7 +1,6 @@
 """Tests for learning_tools module."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 import json
 
 from .learning_tools import (
@@ -10,7 +9,6 @@ from .learning_tools import (
     EXTRACT_PROMPT,
     APPLY_PROMPT,
     RECALL_PROMPT,
-    LEARNING_GROUP_ID,
 )
 
 

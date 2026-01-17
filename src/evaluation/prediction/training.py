@@ -5,11 +5,16 @@ This module handles loading training data from JSONL exports
 and orchestrating the model training process.
 """
 
+from __future__ import annotations
+
 import glob
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from .classifier import FailurePredictor
 
 logger = logging.getLogger(__name__)
 

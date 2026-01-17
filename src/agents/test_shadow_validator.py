@@ -11,7 +11,6 @@ Tests cover:
 """
 
 import pytest
-import asyncio
 from .shadow_validator import (
     ShadowValidator,
     ValidationResult,

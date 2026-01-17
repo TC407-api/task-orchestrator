@@ -3,7 +3,6 @@
 Monitors context window usage and triggers dynamic mode when threshold is reached.
 """
 from typing import Dict, Any, Optional, Callable
-import json
 
 
 class ContextTracker:

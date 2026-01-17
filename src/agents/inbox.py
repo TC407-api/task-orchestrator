@@ -20,7 +20,6 @@ import sqlite3
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
 from enum import Enum
-from pathlib import Path
 from threading import Lock
 from typing import Any, AsyncGenerator, Callable, Optional
 from uuid import uuid4
@@ -251,7 +250,8 @@ class UniversalInbox:
         )
 
         conn.commit()
-        if self._conn is None: conn.close()
+        if self._conn is None:
+            conn.close()
 
     async def publish(self, event: AgentEvent) -> None:
         """
@@ -296,7 +296,8 @@ class UniversalInbox:
                 )
                 conn.commit()
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     async def subscribe(self) -> AsyncGenerator[AgentEvent, None]:
         """
@@ -414,7 +415,8 @@ class UniversalInbox:
                 )
                 conn.commit()
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     def get_pending_approvals(
         self,
@@ -585,7 +587,8 @@ class UniversalInbox:
                 )
                 conn.commit()
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     def get_action(self, action_id: str) -> Optional[PendingAction]:
         """Get a specific pending action by ID."""
@@ -638,7 +641,8 @@ class UniversalInbox:
                 columns = [col[0] for col in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     def get_event_history(
         self,
@@ -682,7 +686,8 @@ class UniversalInbox:
                 columns = [col[0] for col in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     async def clear_expired_actions(self) -> int:
         """
@@ -721,7 +726,7 @@ class UniversalInbox:
 
 
 def requires_approval(
-    action_type: str = None,
+    action_type: Optional[str] = None,
     risk_level: ActionRiskLevel = ActionRiskLevel.HIGH,
     timeout_seconds: int = 300,
 ):
@@ -753,7 +758,7 @@ def requires_approval(
             inbox = kwargs.get("inbox")
             if not inbox:
                 raise ValueError(
-                    f"@requires_approval decorator requires 'inbox' parameter"
+                    "@requires_approval decorator requires 'inbox' parameter"
                 )
 
             # Extract agent name from caller context if available
@@ -810,7 +815,7 @@ def requires_approval(
             inbox = kwargs.get("inbox")
             if not inbox:
                 raise ValueError(
-                    f"@requires_approval decorator requires 'inbox' parameter"
+                    "@requires_approval decorator requires 'inbox' parameter"
                 )
 
             # For sync functions, just execute (approval is async-only)

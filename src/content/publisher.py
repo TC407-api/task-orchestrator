@@ -24,7 +24,7 @@ from ..agents.inbox import UniversalInbox, AgentEvent, EventType
 from ..integrations.twitter import TwitterClient
 from ..integrations.linkedin import LinkedInClient
 from ..integrations.devto import DevToClient
-from .generator import Campaign, Platform, PlatformContent, PLATFORM_CONSTRAINTS
+from .generator import Campaign, Platform, PlatformContent
 
 logger = logging.getLogger(__name__)
 

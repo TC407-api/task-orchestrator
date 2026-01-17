@@ -5,8 +5,6 @@ from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-
-logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -27,6 +25,7 @@ from ..integrations.calendar import CalendarClient
 from ..core.auth import get_oauth_credentials, get_all_scopes
 from ..core.config import settings
 
+logger = logging.getLogger(__name__)
 
 # Global coordinator instance
 coordinator: Optional[CoordinatorAgent] = None

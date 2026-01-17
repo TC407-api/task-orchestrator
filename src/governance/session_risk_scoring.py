@@ -7,7 +7,7 @@ Provides continuous risk assessment based on:
 - Capability abuse (unexpected capability usage)
 - Rate anomaly (unusual request frequency)
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional

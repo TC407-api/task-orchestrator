@@ -6,16 +6,13 @@ Tests the portfolio registry, pattern decay, and cross-project federation.
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import federation components
 from src.evaluation.immune_system.registry import (
     PortfolioProject,
-    RegistryConfig,
     RegistryManager,
     get_registry_manager,
     reset_registry_manager,
-    REGISTRY_GROUP_ID,
 )
 from src.evaluation.immune_system.decay import (
     PatternDecaySystem,
@@ -28,9 +25,6 @@ from src.evaluation.immune_system.decay import (
 )
 from src.evaluation.immune_system.federation import (
     PatternFederation,
-    PatternVisibility,
-    FederatedPattern,
-    ScoredPattern,
 )
 
 
@@ -449,8 +443,8 @@ class TestFederationIntegration:
         decay = get_decay_system()
 
         # Simulate pattern interactions
-        meta1 = decay.register_interaction("pattern-1", InteractionOutcome.CRITICAL_SUCCESS)
-        meta2 = decay.register_interaction("pattern-2", InteractionOutcome.FAILURE_PENALTY)
+        decay.register_interaction("pattern-1", InteractionOutcome.CRITICAL_SUCCESS)
+        decay.register_interaction("pattern-2", InteractionOutcome.FAILURE_PENALTY)
 
         # Verify scores
         score1 = decay.get_current_relevance("pattern-1")

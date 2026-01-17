@@ -7,7 +7,6 @@ import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
 
 from src.governance.agent_identity import (
     AgentCredential,
@@ -180,7 +179,7 @@ class TestAgentIdentityManagerRotation:
         manager, old_credential = manager_with_agent
         old_public_key = old_credential.public_key
 
-        new_credential = manager.rotate_credential(old_credential.agent_id)
+        manager.rotate_credential(old_credential.agent_id)
 
         # Old key should no longer verify
         assert not manager.verify_agent(

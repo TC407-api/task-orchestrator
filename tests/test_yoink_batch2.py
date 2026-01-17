@@ -25,13 +25,14 @@ import time
 import json
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable, Coroutine
-from unittest.mock import AsyncMock, MagicMock, patch, call
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-import threading
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List
+from datetime import datetime
+
+# Import actual implementations instead of TDD mock classes
+from src.agents.terminal_loop import TerminalLoop, LoopState, LoopIteration
+from src.agents.shadow_validator import ShadowValidator
+from src.agents.workflows import step, workflow, StepStatus
+from src.agents.background_tasks import BackgroundTaskManager, TaskManagerStatus
 
 
 # =============================================================================
@@ -40,9 +41,6 @@ from concurrent.futures import ThreadPoolExecutor
 # A reusable loop system for agent tasks, dialogue, and iterative workflows.
 # Supports local execution, distributed queues, and monitoring.
 
-# Import actual implementations instead of TDD mock classes
-from src.agents.terminal_loop import TerminalLoop, LoopState, LoopIteration
-
 
 class TestTerminalLoopBasics:
     """Tests for basic terminal loop functionality."""
@@ -50,7 +48,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_create_terminal_loop(self):
         """Test creating a terminal loop instance."""
-        from src.agents.terminal_loop import TerminalLoop
 
         loop = TerminalLoop(
             name="test_loop",
@@ -66,7 +63,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_run_single_iteration(self):
         """Test running a single iteration."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def simple_task(input_data: Dict) -> Dict:
             return {"result": input_data.get("value", 0) * 2}
@@ -80,7 +76,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_multiple_iterations(self):
         """Test running multiple iterations until condition."""
-        from src.agents.terminal_loop import TerminalLoop
 
         iteration_count = 0
 
@@ -98,7 +93,7 @@ class TestTerminalLoopBasics:
             loop_condition=should_continue,
         )
 
-        final_result = await loop.run({}, task_with_state)
+        await loop.run({}, task_with_state)
 
         assert iteration_count == 5
         assert loop.state == LoopState.COMPLETED
@@ -106,7 +101,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_state_transitions(self):
         """Test state transitions during loop execution."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def task(input_data):
             await asyncio.sleep(0.01)
@@ -118,14 +112,13 @@ class TestTerminalLoopBasics:
 
         task_coro = loop.run({}, task)
         # State should transition to RUNNING
-        result = await task_coro
+        await task_coro
 
         assert loop.state == LoopState.COMPLETED
 
     @pytest.mark.asyncio
     async def test_terminal_loop_timeout(self):
         """Test that loop respects timeout."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def slow_task(input_data):
             await asyncio.sleep(10)
@@ -141,7 +134,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_iteration_history(self):
         """Test that iteration history is tracked."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def task(input_data):
             return {"value": input_data.get("value", 0) + 1}
@@ -164,7 +156,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_pause_resume(self):
         """Test pausing and resuming a loop."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def task(input_data):
             await asyncio.sleep(0.1)  # Add delay to ensure loop is running when pause is called
@@ -190,7 +181,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_error_handling(self):
         """Test error handling and retry logic."""
-        from src.agents.terminal_loop import TerminalLoop
 
         call_count = 0
 
@@ -215,7 +205,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_persistent_storage(self):
         """Test persistent loop state."""
-        from src.agents.terminal_loop import TerminalLoop
 
         with tempfile.TemporaryDirectory() as tmpdir:
             persistence_file = Path(tmpdir) / "loop_state.json"
@@ -240,7 +229,6 @@ class TestTerminalLoopBasics:
     @pytest.mark.asyncio
     async def test_terminal_loop_cancel(self):
         """Test cancelling a loop."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def long_task(input_data):
             await asyncio.sleep(10)
@@ -264,7 +252,6 @@ class TestTerminalLoopCallbacks:
     @pytest.mark.asyncio
     async def test_loop_iteration_callback(self):
         """Test on_iteration_complete callback."""
-        from src.agents.terminal_loop import TerminalLoop
 
         callback_results = []
 
@@ -292,7 +279,6 @@ class TestTerminalLoopCallbacks:
     @pytest.mark.asyncio
     async def test_loop_statistics(self):
         """Test gathering loop statistics."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def task(input_data):
             await asyncio.sleep(0.01)
@@ -318,7 +304,6 @@ class TestTerminalLoopCallbacks:
     @pytest.mark.asyncio
     async def test_loop_input_output_validation(self):
         """Test input/output validation."""
-        from src.agents.terminal_loop import TerminalLoop
 
         def validate_input(input_data):
             assert isinstance(input_data, dict)
@@ -344,7 +329,6 @@ class TestTerminalLoopDistributed:
     @pytest.mark.asyncio
     async def test_loop_with_queue_backend(self):
         """Test loop with distributed queue backend."""
-        from src.agents.terminal_loop import TerminalLoop
 
         queue_items = []
 
@@ -366,7 +350,6 @@ class TestTerminalLoopDistributed:
     @pytest.mark.asyncio
     async def test_loop_with_priority_handling(self):
         """Test loop respects item priority."""
-        from src.agents.terminal_loop import TerminalLoop
 
         processed_order = []
 
@@ -387,7 +370,6 @@ class TestTerminalLoopPerformance:
     @pytest.mark.asyncio
     async def test_loop_throughput(self):
         """Test loop throughput - iterations per second."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def fast_task(input_data):
             return {"value": input_data.get("value", 0) + 1}
@@ -414,11 +396,9 @@ class TestTerminalLoopPerformance:
     @pytest.mark.asyncio
     async def test_loop_memory_efficiency(self):
         """Test loop doesn't accumulate excess memory."""
-        from src.agents.terminal_loop import TerminalLoop
 
         async def task(input_data):
             # Create some data that should be garbage collected
-            large_data = [0] * 10000
             return {"value": input_data.get("value", 0) + 1}
 
         def should_continue(result):
@@ -442,22 +422,12 @@ class TestTerminalLoopPerformance:
 # A validation system that compares actual code AST against expected patterns.
 # Detects mutations, unexpected changes, and security issues.
 
-# Import actual implementations instead of TDD mock classes
-from src.agents.shadow_validator import (
-    ShadowValidator,
-    ShadowComparator,
-    ASTNodeType,
-    ASTNode,
-    ShadowValidationResult as ValidationResult,
-)
-
 
 class TestShadowASTValidation:
     """Tests for shadow AST validation."""
 
     def test_parse_python_source(self):
         """Test parsing Python source code into AST."""
-        from src.agents.shadow_validator import ShadowValidator
 
         source_code = """
 def hello(name):
@@ -476,7 +446,6 @@ class MyClass:
 
     def test_extract_function_signature(self):
         """Test extracting function signatures."""
-        from src.agents.shadow_validator import ShadowValidator
 
         source_code = "def add(a, b, c=0): return a + b + c"
 
@@ -489,7 +458,6 @@ class MyClass:
 
     def test_validate_against_shadow(self):
         """Test validating code against a shadow copy."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 def process_data(data):
@@ -512,7 +480,6 @@ def process_data(data):
 
     def test_detect_function_mutation(self):
         """Test detecting function mutations."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 def calculate(x):
@@ -534,7 +501,6 @@ def calculate(x):
 
     def test_detect_added_imports(self):
         """Test detecting added or removed imports."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 import os
@@ -555,7 +521,6 @@ import subprocess  # Added!
 
     def test_detect_parameter_changes(self):
         """Test detecting parameter list changes."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 def func(a, b):
@@ -575,7 +540,6 @@ def func(a, b, c):  # Added parameter!
 
     def test_detect_security_violations(self):
         """Test detecting security violations."""
-        from src.agents.shadow_validator import ShadowValidator
 
         dangerous_code = """
 import os
@@ -590,7 +554,6 @@ def dangerous():
 
     def test_validate_class_structure(self):
         """Test validating class structure."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 class Calculator:
@@ -618,7 +581,6 @@ class Calculator:
 
     def test_detect_removed_methods(self):
         """Test detecting removed methods."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 class DataHandler:
@@ -642,7 +604,6 @@ class DataHandler:
 
     def test_validate_call_chains(self):
         """Test validating method call chains."""
-        from src.agents.shadow_validator import ShadowValidator
 
         source = """
 result = data.filter(x > 5).map(x * 2).collect()
@@ -657,7 +618,6 @@ result = data.filter(x > 5).map(x * 2).collect()
 
     def test_validate_return_statements(self):
         """Test validating return statement consistency."""
-        from src.agents.shadow_validator import ShadowValidator
 
         good_code = """
 def process(x):
@@ -674,7 +634,6 @@ def process(x):
 
     def test_incremental_validation(self):
         """Test validating code incrementally as it changes."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 def calculate(x):
@@ -691,7 +650,7 @@ def calculate(x):
     return result
 """
 
-        result1 = validator.validate_shadow(change1)
+        validator.validate_shadow(change1)
         # Should be valid (just refactoring)
 
         # Second change
@@ -701,12 +660,11 @@ def calculate(x):
     return result
 """
 
-        result2 = validator.validate_shadow(change2)
+        validator.validate_shadow(change2)
         # Should be invalid (logic changed)
 
     def test_generate_diff_report(self):
         """Test generating validation report."""
-        from src.agents.shadow_validator import ShadowValidator
 
         original = """
 def main():
@@ -724,7 +682,7 @@ def main():
 
         validator = ShadowValidator()
         validator.set_shadow(original)
-        result = validator.validate_shadow(modified)
+        validator.validate_shadow(modified)
 
         report = validator.generate_report()
         assert "original" in report or True  # Optional detailed report
@@ -735,15 +693,6 @@ def main():
 # =============================================================================
 # Decorator-based workflow system for orchestrating multi-step operations.
 
-# Import actual implementations instead of TDD mock classes
-from src.agents.workflows import (
-    step,
-    workflow,
-    StepStatus,
-    WorkflowStepDef,
-    DecoratorWorkflowState as WorkflowState,
-)
-
 
 class TestWorkflowDecorator:
     """Tests for @Workflow decorator."""
@@ -751,7 +700,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_simple_workflow_definition(self):
         """Test defining a simple workflow with decorator."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="data_pipeline", description="Process data")
         class DataPipeline:
@@ -773,7 +721,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_execution(self):
         """Test executing a complete workflow."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="simple_wf")
         class SimpleWorkflow:
@@ -794,7 +741,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_dependency_resolution(self):
         """Test step dependency ordering."""
-        from src.agents.workflows import workflow, step
 
         execution_order = []
 
@@ -823,7 +769,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_step_timeout(self):
         """Test step timeout handling."""
-        from src.agents.workflows import workflow, step, StepStatus
 
         @workflow(name="timeout_wf")
         class TimeoutWorkflow:
@@ -843,7 +788,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_error_handling(self):
         """Test workflow error handling."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="error_wf")
         class ErrorWorkflow:
@@ -864,7 +808,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_retry_logic(self):
         """Test step retry on failure."""
-        from src.agents.workflows import workflow, step
 
         call_count = 0
 
@@ -886,7 +829,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_state_management(self):
         """Test workflow state tracking."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="state_wf")
         class StateWorkflow:
@@ -907,7 +849,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_parallel_steps(self):
         """Test parallel execution of independent steps."""
-        from src.agents.workflows import workflow, step  # parallel decorator not needed
 
         @workflow(name="parallel_wf")
         class ParallelWorkflow:
@@ -936,7 +877,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_conditional_steps(self):
         """Test conditional step execution."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="conditional_wf")
         class ConditionalWorkflow:
@@ -967,7 +907,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_data_passing(self):
         """Test passing data between workflow steps."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="data_wf")
         class DataWorkflow:
@@ -988,7 +927,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_cancellation(self):
         """Test cancelling a workflow mid-execution."""
-        from src.agents.workflows import workflow, step, StepStatus
 
         @workflow(name="cancel_wf")
         class CancelWorkflow:
@@ -1008,7 +946,7 @@ class TestWorkflowDecorator:
         wf.cancel()
 
         # Implementation sets _cancelled flag, doesn't raise CancelledError
-        result = await task
+        await task
         state = wf.get_state()
         # Workflow should be marked as failed/cancelled
         assert state.status == StepStatus.FAILED or wf._cancelled
@@ -1016,7 +954,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_persistence(self):
         """Test saving and resuming workflow state."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="persist_wf", persistent=True)
         class PersistWorkflow:
@@ -1046,7 +983,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_hooks(self):
         """Test workflow lifecycle hooks."""
-        from src.agents.workflows import workflow, step
 
         hooks_called = []
 
@@ -1075,7 +1011,6 @@ class TestWorkflowDecorator:
     @pytest.mark.asyncio
     async def test_workflow_monitoring(self):
         """Test workflow monitoring and metrics."""
-        from src.agents.workflows import workflow, step
 
         @workflow(name="monitor_wf")
         class MonitorWorkflow:
@@ -1097,14 +1032,6 @@ class TestWorkflowDecorator:
 # =============================================================================
 # Async background task queue with scheduling, retries, and monitoring.
 
-# Import actual implementations instead of TDD mock classes
-from src.agents.background_tasks import (
-    BackgroundTaskManager,
-    TaskManagerStatus,
-    TaskManagerDefinition as TaskDefinition,
-    TaskManagerExecution as TaskExecution,
-)
-
 
 class TestBackgroundTasks:
     """Tests for background task system."""
@@ -1112,7 +1039,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_create_background_task(self):
         """Test creating a background task."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def my_task():
             return {"done": True}
@@ -1129,7 +1055,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_enqueue_and_process_task(self):
         """Test enqueueing and processing a task."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         result_holder = []
 
@@ -1151,7 +1076,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_scheduling(self):
         """Test scheduled task execution."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         call_count = 0
 
@@ -1174,7 +1098,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_priority_handling(self):
         """Test tasks execute in priority order."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         execution_order = []
 
@@ -1206,7 +1129,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_retry_on_failure(self):
         """Test task retry on failure."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         attempt_count = 0
 
@@ -1224,14 +1146,13 @@ class TestBackgroundTasks:
 
         await asyncio.sleep(0.5)  # Give more time for retries
 
-        execution = manager.get_execution(execution_id)
+        manager.get_execution(execution_id)
         # After retries, should be completed or at least attempted
         assert attempt_count >= 1  # At least one attempt made
 
     @pytest.mark.asyncio
     async def test_task_timeout(self):
         """Test task timeout handling."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def slow_task(data=None):  # Accept optional data parameter
             await asyncio.sleep(10)
@@ -1250,7 +1171,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_cancellation(self):
         """Test cancelling a running task."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def long_task(data=None):  # Accept optional data parameter
             await asyncio.sleep(10)
@@ -1270,7 +1190,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_result_storage(self):
         """Test storing and retrieving task results."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def result_task(data=None):  # Accept optional data parameter
             return {"data": "important_result", "value": 42}
@@ -1294,7 +1213,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_error_tracking(self):
         """Test tracking task errors."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def error_task():
             raise RuntimeError("Task failed with error")
@@ -1316,7 +1234,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_queue_depth_monitoring(self):
         """Test monitoring queue depth."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def task():
             await asyncio.sleep(0.05)
@@ -1337,7 +1254,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_worker_pool(self):
         """Test worker pool management."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         concurrent_runs = 0
         max_concurrent = 0
@@ -1366,7 +1282,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_persistence(self):
         """Test persisting task queue to storage."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         # Skip temp directory cleanup issue - just verify registration works
         manager = BackgroundTaskManager()  # No persistence to avoid file lock issues
@@ -1385,7 +1300,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_dependency_chain(self):
         """Test task dependency execution."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         results = []
 
@@ -1415,7 +1329,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_batch_task_processing(self):
         """Test processing batch of tasks."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         processed_items = []
 
@@ -1445,7 +1358,6 @@ class TestBackgroundTasks:
     @pytest.mark.asyncio
     async def test_task_dead_letter_queue(self):
         """Test dead letter queue for failed tasks."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def failing_task():
             raise RuntimeError("Always fails")
@@ -1454,7 +1366,7 @@ class TestBackgroundTasks:
         manager = BackgroundTaskManager()
         await manager.start()  # Start manager
         task_id = manager.register_task("dead_letter", failing_task, retries=1)
-        execution_id = await manager.enqueue(task_id)
+        await manager.enqueue(task_id)
 
         await asyncio.sleep(0.3)
 
@@ -1474,7 +1386,6 @@ class TestBackgroundTasksMonitoring:
     @pytest.mark.asyncio
     async def test_task_metrics_collection(self):
         """Test collecting task metrics."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def metric_task():
             await asyncio.sleep(0.01)
@@ -1498,7 +1409,6 @@ class TestBackgroundTasksMonitoring:
     @pytest.mark.asyncio
     async def test_task_history_tracking(self):
         """Test tracking task execution history."""
-        from src.agents.background_tasks import BackgroundTaskManager
 
         async def history_task():
             return {"timestamp": datetime.now().isoformat()}
@@ -1523,10 +1433,9 @@ class TestBackgroundTasksIntegration:
     @pytest.mark.asyncio
     async def test_workflow_with_background_tasks(self):
         """Test integration of workflows with background tasks."""
-        from src.agents.background_tasks import BackgroundTaskManager
         from src.agents.workflows import workflow, step
 
-        manager = BackgroundTaskManager()
+        BackgroundTaskManager()
 
         @workflow(name="workflow_with_bg")
         class WorkflowWithBG:
@@ -1543,10 +1452,9 @@ class TestBackgroundTasksIntegration:
     @pytest.mark.asyncio
     async def test_terminal_loop_with_background_tasks(self):
         """Test integration of terminal loop with background tasks."""
-        from src.agents.terminal_loop import TerminalLoop
         from src.agents.background_tasks import BackgroundTaskManager
 
-        manager = BackgroundTaskManager()
+        BackgroundTaskManager()
         processed = []
 
         async def background_work(item):
@@ -1554,7 +1462,7 @@ class TestBackgroundTasksIntegration:
             return {"processed": True}
 
         async def loop_task(input_data):
-            item = input_data.get("item")
+            input_data.get("item")
             # Queue background work
             return {"queued": True}
 
@@ -1573,7 +1481,6 @@ class TestBatch2Integration:
     @pytest.mark.asyncio
     async def test_workflow_validates_with_shadow_ast(self):
         """Test that workflows are validated with shadow AST."""
-        from src.agents.workflows import workflow, step
         from src.agents.shadow_validator import ShadowValidator
 
         @workflow(name="validated_wf")
@@ -1582,8 +1489,8 @@ class TestBatch2Integration:
             async def step1(self) -> Dict:
                 return {"value": 1}
 
-        wf = ValidatedWorkflow()
-        validator = ShadowValidator()
+        ValidatedWorkflow()
+        ShadowValidator()
 
         # Workflows should be AST-validatable
         # This integration test just verifies the concept
@@ -1591,10 +1498,9 @@ class TestBatch2Integration:
     @pytest.mark.asyncio
     async def test_background_task_in_terminal_loop(self):
         """Test background task execution within terminal loop."""
-        from src.agents.terminal_loop import TerminalLoop
         from src.agents.background_tasks import BackgroundTaskManager
 
-        manager = BackgroundTaskManager()
+        BackgroundTaskManager()
 
         async def loop_with_bg_task(input_data):
             # Simulate enqueueing a background task
@@ -1608,15 +1514,14 @@ class TestBatch2Integration:
     @pytest.mark.asyncio
     async def test_full_system_integration(self):
         """Test full integration of all batch 2 components."""
-        from src.agents.terminal_loop import TerminalLoop
         from src.agents.workflows import workflow, step
         from src.agents.background_tasks import BackgroundTaskManager
         from src.agents.shadow_validator import ShadowValidator
 
         # Create instances of all components
-        loop = TerminalLoop(name="integrated", max_iterations=1)
-        manager = BackgroundTaskManager()
-        validator = ShadowValidator()
+        TerminalLoop(name="integrated", max_iterations=1)
+        BackgroundTaskManager()
+        ShadowValidator()
 
         @workflow(name="integration_test")
         class IntegrationWorkflow:

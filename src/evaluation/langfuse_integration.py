@@ -170,6 +170,7 @@ class EvaluationTracer:
 
         try:
             # Calculate aggregate metrics
+            passed_count = 0
             if trial.grader_results:
                 passed_count = sum(1 for r in trial.grader_results if r.passed)
                 pass_rate = passed_count / len(trial.grader_results)

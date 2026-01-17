@@ -354,7 +354,7 @@ class TestUniversalInbox:
         )
         await inbox.publish(event)
 
-        action = await inbox.require_approval(
+        await inbox.require_approval(
             action_type="test",
             description="Test",
             agent_name="agent",
@@ -374,7 +374,7 @@ class TestRequiresApprovalDecorator:
 
     async def test_async_function_with_approval(self):
         """Test decorating an async function."""
-        inbox = UniversalInbox()
+        UniversalInbox()
 
         @requires_approval(
             action_type="send_message",

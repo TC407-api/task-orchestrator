@@ -22,11 +22,9 @@ import asyncio
 import json
 import logging
 import sqlite3
-import subprocess
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from enum import Enum
-from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -225,7 +223,7 @@ class BackgroundTaskScheduler:
         conn.commit()
         # Don't close persistent in-memory connection
         if self._conn is None:
-            if self._conn is None: conn.close()
+            conn.close()
 
     async def schedule_task(
         self,
@@ -310,7 +308,8 @@ class BackgroundTaskScheduler:
                 )
                 conn.commit()
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     async def cancel_task(self, task_id: str) -> bool:
         """
@@ -669,7 +668,8 @@ class BackgroundTaskScheduler:
 
                 conn.commit()
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     def get_task_history(
         self,
@@ -718,7 +718,8 @@ class BackgroundTaskScheduler:
                 columns = [col[0] for col in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
             finally:
-                if self._conn is None: conn.close()
+                if self._conn is None:
+                    conn.close()
 
     async def get_statistics(self) -> dict:
         """
@@ -864,7 +865,6 @@ class BackgroundTaskManager:
             storage_path: Path for SQLite storage (if persistent)
             history_size: Maximum execution history entries to keep per task
         """
-        import heapq
 
         self.max_workers = max_workers
         self.enable_scheduler = enable_scheduler
@@ -1232,6 +1232,8 @@ class BackgroundTaskManager:
                     continue
 
                 # Execute with retry logic
+                if self._worker_semaphore is None:
+                    continue
                 async with self._worker_semaphore:
                     await self._execute_with_retry(task_def, execution)
 

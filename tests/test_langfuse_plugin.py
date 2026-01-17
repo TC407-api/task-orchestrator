@@ -8,8 +8,7 @@ The implementation should make them pass.
 import pytest
 from datetime import datetime
 from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
-from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # These imports will fail until implementation exists
 try:

@@ -180,7 +180,7 @@ Respond ONLY with the JSON. No other text."""
                 name=self.name,
                 passed=score >= self.pass_threshold,
                 score=score,
-                message=reasoning,
+                reason=reasoning,
             )
 
             # Cache the result
@@ -193,14 +193,14 @@ Respond ONLY with the JSON. No other text."""
                 name=self.name,
                 passed=False,
                 score=0.0,
-                message="Evaluation failed: Invalid JSON from grader model",
+                reason="Evaluation failed: Invalid JSON from grader model",
             )
         except asyncio.TimeoutError:
             return GraderResult(
                 name=self.name,
                 passed=False,
                 score=0.0,
-                message="Evaluation failed: Grader timed out",
+                reason="Evaluation failed: Grader timed out",
             )
         except Exception as e:
             logger.exception("Unexpected error in ModelGrader")
@@ -208,7 +208,7 @@ Respond ONLY with the JSON. No other text."""
                 name=self.name,
                 passed=False,
                 score=0.0,
-                message=f"Evaluation failed: {str(e)}",
+                reason=f"Evaluation failed: {str(e)}",
             )
 
 

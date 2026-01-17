@@ -10,12 +10,15 @@ Provides context injection capabilities through @Symbol patterns:
 Each workflow triggers context injection for the appropriate archetype.
 """
 
+import asyncio
+import glob as glob_module
+import inspect
 import re
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any
-import glob as glob_module
+from typing import Callable, Dict, List, Optional, Set, Any
 
 
 class WorkflowType(Enum):
@@ -644,11 +647,6 @@ def process_prompt_with_workflows(
 # Decorator-based Workflow System
 # ============================================================================
 
-import asyncio
-import inspect
-import time
-from typing import Callable
-
 
 class StepStatus(str, Enum):
     """Status of a workflow step."""
@@ -799,9 +797,9 @@ def workflow(
             # Initialize workflow state
             self._state = DecoratorWorkflowState(workflow_id=name)
             self._cancelled = False
-            self._start_time: Optional[float] = None
-            self._end_time: Optional[float] = None
-            self._steps_executed: int = 0
+            self._start_time = None  # type: Optional[float]
+            self._end_time = None  # type: Optional[float]
+            self._steps_executed = 0  # type: int
             # PERF: Limit concurrent LLM calls to prevent OOM/quota exhaustion
             self._concurrency_semaphore = asyncio.Semaphore(5)
 

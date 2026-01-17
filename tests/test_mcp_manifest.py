@@ -99,7 +99,7 @@ class TestMCPManifests:
 
         server = data["mcp"]["server"]
         command = server["command"]
-        args = server["args"]
+        server["args"]
 
         # Try to import the server module (doesn't actually start it)
         # This validates the command would work

@@ -5,7 +5,6 @@ They should fail initially until the implementation is complete.
 """
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
 
 from src.governance.session_risk_scoring import (
     SessionRiskScore,

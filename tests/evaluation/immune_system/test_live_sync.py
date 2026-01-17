@@ -10,7 +10,6 @@ Tests cover:
 - Sync Monitor (health tracking, alerts)
 """
 
-import asyncio
 import json
 import pytest
 import time
@@ -19,34 +18,23 @@ from src.evaluation.immune_system.live_sync import (
     # Protocol
     SyncEventType,
     SyncMessage,
-    SyncPayload,
     BackoffStrategy,
-    PatternSyncClient,
-    # Subscriber
     PatternSubscriber,
     PatternEvent,
     ConnectionStatus,
     # Engine
     SyncEngine,
-    SyncDirection,
-    SyncBatch,
     PatternChange,
-    PeerSyncState,
-    # Conflict
     ConflictResolver,
     ConflictStrategy,
     VersionVector,
     Pattern,
-    ConflictRecord,
-    # Hooks
     SyncHooks,
     SyncContext,
     HookEventType,
     # Monitor
     SyncHealthMonitor,
     SyncStatus,
-    SyncAlert,
-    ProjectSyncState,
 )
 
 

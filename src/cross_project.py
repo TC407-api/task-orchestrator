@@ -90,8 +90,8 @@ class CrossProjectLearning:
         self.namespaces = self._load_namespaces()
 
         # Initialize local pattern store
-        self._pattern_store: Optional[PatternStore] = None
-        if _pattern_store_available:
+        self._pattern_store = None  # type: ignore[assignment]
+        if _pattern_store_available and PatternStore is not None:
             try:
                 self._pattern_store = PatternStore()
             except Exception:
@@ -151,8 +151,8 @@ class CrossProjectLearning:
         if self._pattern_store:
             try:
                 p_type = None
-                if pattern_type and hasattr(PatternType, pattern_type.upper()):
-                    p_type = PatternType[pattern_type.upper()]
+                if pattern_type and PatternType is not None and hasattr(PatternType, pattern_type.upper()):
+                    p_type = PatternType[pattern_type.upper()]  # type: ignore[index]
 
                 local_patterns = self._pattern_store.query(
                     group_ids=group_ids,
@@ -244,9 +244,9 @@ class CrossProjectLearning:
                 group_id = self.group_id
 
             # Map string type to enum
-            p_type = PatternType.CODE_PATTERN
-            if hasattr(PatternType, pattern_type.upper()):
-                p_type = PatternType[pattern_type.upper()]
+            p_type = PatternType.CODE_PATTERN if PatternType is not None else None  # type: ignore[union-attr]
+            if PatternType is not None and hasattr(PatternType, pattern_type.upper()):
+                p_type = PatternType[pattern_type.upper()]  # type: ignore[index]
 
             pattern = self._pattern_store.add_pattern(
                 pattern_type=p_type,

@@ -708,7 +708,7 @@ class LinterRunner:
             return {"available": False, "errors": [], "warnings": []}
 
     @staticmethod
-    def _parse_ruff_output(issues: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    def _parse_ruff_output(issues: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Parse ruff JSON output."""
         errors = []
         warnings = []
@@ -729,7 +729,7 @@ class LinterRunner:
         return {"available": True, "errors": errors, "warnings": warnings}
 
     @staticmethod
-    def _parse_eslint_output(issues: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    def _parse_eslint_output(issues: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Parse eslint JSON output."""
         errors = []
         warnings = []

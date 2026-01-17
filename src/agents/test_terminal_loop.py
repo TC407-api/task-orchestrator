@@ -1,8 +1,6 @@
 """Tests for the Terminal-to-Editor Loop system."""
 
-import asyncio
 import pytest
-from pathlib import Path
 
 from .terminal_loop import (
     TerminalListener,
@@ -50,7 +48,7 @@ AttributeError: 'NoneType' object has no attribute 'process'
 
         assert len(locations) >= 1
         # Find the app/index.js location
-        app_locations = [l for l in locations if "index.js" in l.file_path]
+        app_locations = [loc for loc in locations if "index.js" in loc.file_path]
         assert len(app_locations) > 0
         assert app_locations[0].line_number == 15
         assert app_locations[0].column_number == 8
@@ -239,7 +237,7 @@ class TestFixProposer:
 
     def test_fix_proposal_to_dict(self):
         """Test FixProposal serialization."""
-        proposal = proposer_module = FixProposer()._propose_python_fixes(
+        proposal = FixProposer()._propose_python_fixes(
             DetectedError(
                 error_id="err123",
                 error_type="ImportError",

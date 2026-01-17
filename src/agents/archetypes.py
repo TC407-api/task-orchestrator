@@ -17,7 +17,6 @@ Each archetype has:
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Dict, Any, Set
-from abc import ABC, abstractmethod
 
 
 class ArchetypeType(Enum):

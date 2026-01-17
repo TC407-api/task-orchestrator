@@ -115,11 +115,13 @@ class JSONSchemaGrader(Grader):
             jsonschema.validate(instance=data_to_validate, schema=self.schema)
             return self._make_result(True, 1.0, "Schema validation passed")
         except ValidationError as e:
+            error_msg = getattr(e, 'message', str(e))
+            error_path = list(getattr(e, 'path', [])) if hasattr(e, 'path') else []
             return self._make_result(
                 False,
                 0.0,
-                f"Schema validation failed: {e.message}",
-                path=list(e.path) if hasattr(e, 'path') else []
+                f"Schema validation failed: {error_msg}",
+                path=error_path
             )
 
 

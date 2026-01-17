@@ -1,10 +1,8 @@
 """Tests for ToolRouter - TDD RED phase."""
-import pytest
 from src.mcp.tool_router import (
     ToolRouter,
     ToolCategory,
     CORE_TOOLS,
-    TOOL_CATEGORIES,
 )
 
 

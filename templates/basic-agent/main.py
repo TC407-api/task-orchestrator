@@ -6,7 +6,6 @@ A simple example showing how to spawn a Gemini agent using task-orchestrator.
 """
 
 import asyncio
-import os
 from typing import Optional
 
 

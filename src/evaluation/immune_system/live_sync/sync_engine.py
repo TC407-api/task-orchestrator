@@ -8,7 +8,7 @@ portfolio projects with batch processing and state tracking.
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 

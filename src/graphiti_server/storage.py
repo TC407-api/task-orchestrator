@@ -151,7 +151,7 @@ class LocalGraphitiStorage:
                 if data.get("project"):
                     node = self._create_node(
                         name=data["project"],
-                        summary=f"Source project for learning",
+                        summary="Source project for learning",
                         group_id=group_id,
                         episode_uuid=episode_uuid,
                         created_at=created_at,

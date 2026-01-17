@@ -1,5 +1,4 @@
 """Tests for ContextTracker - TDD RED phase."""
-import pytest
 from unittest.mock import Mock
 from src.mcp.context_tracker import ContextTracker
 

@@ -121,7 +121,7 @@ async def run_workflow(task: str) -> List[AgentResult]:
     print("\n[BUILDER] Implementing...")
     builder_result = await spawn_agent(
         role=AgentRole.BUILDER,
-        prompt=f"Implement based on the architect's plan",
+        prompt="Implement based on the architect's plan",
         context=architect_result.output,
     )
     results.append(builder_result)

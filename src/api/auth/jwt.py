@@ -15,13 +15,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from jose import JWTError, jwt
-from jose.utils import base64url_encode
 from passlib.context import CryptContext
 from pydantic import BaseModel
 import structlog
 
 if TYPE_CHECKING:
-    from src.governance.agent_identity import AgentCredential, ArchetypeType
+    from src.governance.agent_identity import AgentCredential
 
 logger = structlog.get_logger(__name__)
 

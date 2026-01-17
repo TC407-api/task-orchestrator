@@ -9,8 +9,6 @@ from ..core.cost_tracker import Provider, get_cost_tracker
 from ..agents.coordinator import CoordinatorAgent, TaskStatus
 from ..agents.email_agent import TaskPriority
 from ..agents.archetype_registry import (
-    Archetype,
-    ArchetypeRegistry,
     get_archetype_registry,
 )
 from ..agents.audit_workflow import AuditWorkflow
@@ -18,20 +16,18 @@ from ..agents.inbox import (
     UniversalInbox,
     AgentEvent,
     EventType,
-    PendingAction,
     ActionRiskLevel,
-    ApprovalStatus,
 )
-from ..agents.terminal_loop import TerminalListener, ErrorCapture, StackTraceParser
-from ..agents.shadow_validator import ShadowValidator, ValidationResult
-from ..agents.workflows import WorkflowRegistry, WorkflowTrigger, WorkflowExecutor
+from ..agents.terminal_loop import TerminalListener
+from ..agents.shadow_validator import ShadowValidator
+from ..agents.workflows import WorkflowRegistry, WorkflowTrigger
 from ..agents.background_tasks import BackgroundTaskScheduler, ScheduledTask, TaskScheduleType
 from ..observability import trace_operation
 from ..self_healing import (
     CircuitBreaker,
     get_healing_status,
 )
-from .tool_router import ToolRouter, ToolCategory, TOOL_CATEGORIES
+from .tool_router import ToolRouter
 from .context_tracker import ContextTracker
 from .content_tools import CONTENT_TOOLS, ContentToolsHandler
 from .research_tools import RESEARCH_TOOLS, ResearchToolHandler
@@ -1429,7 +1425,7 @@ class TaskOrchestratorMCP:
             }
 
         # Subscribe via federation
-        result = await federation.subscribe_to_project(project.group_id)
+        await federation.subscribe_to_project(project.group_id)
 
         # Update local project subscriptions
         local_project = await self._registry.get_project("task-orchestrator")
@@ -2396,7 +2392,7 @@ NEVER say "should work" - RUN IT and show the output.""")
         """Execute a workflow trigger."""
         workflow_name = args["workflow"]
         prompt = args["prompt"]
-        target_files = args.get("target_files", [])
+        args.get("target_files", [])
 
         try:
             # Get workflow - convert "refactor" to "@Refactor" format
@@ -2594,7 +2590,7 @@ NEVER say "should work" - RUN IT and show the output.""")
                     cat.value for cat in self._tool_router.get_loaded_categories()
                 ),
             }
-        except ValueError as e:
+        except ValueError:
             return {
                 "success": False,
                 "error": f"Invalid category: {category}",

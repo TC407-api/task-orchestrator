@@ -530,12 +530,10 @@ class TestContentGeneratorIntegration:
         assert len(campaign.platforms) == 5
 
         # Validate all content
-        all_valid = True
         for platform in campaign.platforms:
             content = campaign.get_content(platform)
             is_valid, issues = generator.validate_content(content)
             if not is_valid:
-                all_valid = False
                 print(f"{platform.value} issues: {issues}")
 
         # At minimum, content should be generated (validation may flag some issues)

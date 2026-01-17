@@ -24,7 +24,6 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 from uuid import uuid4
 
@@ -658,6 +657,7 @@ class TerminalListener:
         Returns:
             Tuple of (stdout, stderr, exit_code)
         """
+        command_id = str(uuid4())[:8]
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -668,8 +668,9 @@ class TerminalListener:
 
             self.last_process = process
             command_str = " ".join(command)
-            command_id = str(uuid4())[:8]
-            self.active_commands[command_id] = asyncio.current_task()
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                self.active_commands[command_id] = current_task
 
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -684,7 +685,7 @@ class TerminalListener:
             else:
                 stdout_str = stdout.decode("utf-8", errors="replace")
                 stderr_str = stderr.decode("utf-8", errors="replace")
-                exit_code = process.returncode
+                exit_code = process.returncode if process.returncode is not None else -1
 
             # Capture errors
             error = self.error_capture.capture_from_output(
@@ -731,8 +732,9 @@ class TerminalListener:
                 and event.source == "terminal_loop"
             ):
                 error_data = event.data
+                timestamp_str = error_data.get("timestamp")
                 error = DetectedError(
-                    error_id=error_data.get("error_id"),
+                    error_id=error_data.get("error_id", str(uuid4())[:8]),
                     language=ErrorLanguage(
                         error_data.get("language", "generic")
                     ),
@@ -741,9 +743,7 @@ class TerminalListener:
                     ),
                     error_type=error_data.get("error_type", "Unknown"),
                     error_message=error_data.get("error_message", ""),
-                    timestamp=datetime.fromisoformat(
-                        error_data.get("timestamp")
-                    ),
+                    timestamp=datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(),
                     raw_output=error_data.get("raw_output", ""),
                     exit_code=error_data.get("exit_code"),
                     command=error_data.get("command"),
@@ -952,7 +952,7 @@ class TerminalLoop:
         except asyncio.CancelledError:
             self._state = LoopState.CANCELLED
             raise
-        except Exception as e:
+        except Exception:
             self._state = LoopState.FAILED
             raise
         finally:
@@ -1081,6 +1081,9 @@ class TerminalLoop:
                 else:
                     # Max retries exhausted
                     raise last_exception
+
+        # This should never be reached, but satisfies type checker
+        raise RuntimeError("Unexpected end of retry loop")
 
     def pause(self) -> None:
         """Pause the loop after current iteration completes."""

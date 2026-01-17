@@ -5,7 +5,7 @@ Provides tools for generating and publishing content across platforms.
 Integrates with the Content Automation System.
 """
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from ..content import (
     ContentGenerator,

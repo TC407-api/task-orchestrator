@@ -8,11 +8,9 @@ pattern change events with buffering and replay support.
 import asyncio
 import json
 import logging
-import time
-import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Awaitable, Callable, Dict, List, Set, Union
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +204,7 @@ class PatternSubscriber:
 
     async def _handshake_and_replay(self) -> None:
         """Sends active subscriptions and cursors to request replay."""
-        payload = {
+        {
             "type": "HANDSHAKE",
             "token": self._auth_token,
             "subscriptions": list(self._subscriptions),
@@ -278,7 +276,7 @@ class PatternSubscriber:
 
     async def _send_subscription_request(self, project_id: str) -> None:
         """Sends subscription request."""
-        payload = {
+        {
             "type": "SUBSCRIBE",
             "project_id": project_id,
             "since_cursor": self._cursors.get(project_id)
@@ -287,7 +285,6 @@ class PatternSubscriber:
 
     async def _send_unsubscribe_request(self, project_id: str) -> None:
         """Sends unsubscribe request."""
-        payload = {"type": "UNSUBSCRIBE", "project_id": project_id}
         logger.debug(f"Sent unsubscribe for {project_id}")
 
 

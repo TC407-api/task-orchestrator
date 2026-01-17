@@ -6,11 +6,10 @@ from datetime import datetime, timedelta
 from .background_tasks import (
     BackgroundTaskScheduler,
     ScheduledTask,
-    TaskResult,
     TaskScheduleType,
     TaskStatus,
 )
-from .inbox import UniversalInbox, EventType
+from .inbox import UniversalInbox
 
 
 @pytest.fixture
@@ -306,8 +305,8 @@ async def test_list_scheduled_tasks(scheduler):
         interval_seconds=5,
     )
 
-    task_id1 = await scheduler.schedule_task(task1)
-    task_id2 = await scheduler.schedule_task(task2)
+    await scheduler.schedule_task(task1)
+    await scheduler.schedule_task(task2)
 
     tasks = await scheduler.list_scheduled_tasks()
     assert len(tasks) == 2
@@ -423,7 +422,7 @@ async def test_inbox_integration(inbox):
             if len(events) >= 2:  # Scheduled + completed
                 break
 
-    task_id = await scheduler.schedule_task(task)
+    await scheduler.schedule_task(task)
 
     await scheduler.start()
 

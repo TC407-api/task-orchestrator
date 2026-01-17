@@ -1,7 +1,6 @@
 """Tests for server integration with dynamic tool loading."""
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-import sys
+from unittest.mock import MagicMock
 
 # Import server
 from src.mcp.server import TaskOrchestratorMCP
@@ -71,7 +70,7 @@ class TestServerIntegration:
     @pytest.mark.asyncio
     async def test_request_tool_handler_loads_category(self, server, mock_router):
         """Test that request_tool handler loads the requested category."""
-        from src.mcp.tool_router import ToolRouter, ToolCategory
+        from src.mcp.tool_router import ToolCategory
 
         # Initialize server
         await server.initialize()

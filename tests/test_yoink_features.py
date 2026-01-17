@@ -16,8 +16,8 @@ import json
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
+from typing import Dict, List, Any
+from unittest.mock import AsyncMock
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -837,7 +837,7 @@ class TestYoinkIntegration:
         inbox = AsyncMock()
 
         # Select an archetype
-        archetype = registry["security_auditor"]
+        registry["security_auditor"]
 
         # Create an event for security audit
         event = {
@@ -868,7 +868,7 @@ class TestYoinkIntegration:
 
         # Step 2: Grant approval
         inbox.grant_approval = AsyncMock(return_value=True)
-        approved = await inbox.grant_approval(
+        await inbox.grant_approval(
             approval_id=approval_id,
             approver="admin@example.com",
         )
@@ -892,7 +892,7 @@ class TestYoinkIntegration:
         inbox = AsyncMock()
 
         # 1. Select archetype
-        archetype = registry["security_auditor"]
+        registry["security_auditor"]
 
         # 2. Publish event to inbox
         event = {
@@ -921,10 +921,10 @@ class TestYoinkIntegration:
 
         # 5. Log to audit
         with open(temp_audit_file, 'a') as f:
-            f.write(f"\n## Yoink Workflow\n")
+            f.write("\n## Yoink Workflow\n")
             f.write(f"- Approval ID: {approval_id}\n")
-            f.write(f"- Archetype: security_auditor\n")
-            f.write(f"- Action: scan_dependencies\n")
+            f.write("- Archetype: security_auditor\n")
+            f.write("- Action: scan_dependencies\n")
 
         # Verify all steps completed
         inbox.publish.assert_called()

@@ -5,7 +5,6 @@ TDD RED Phase: These tests define the expected behavior.
 The implementation should make them pass.
 """
 
-import os
 import shutil
 import tempfile
 from pathlib import Path

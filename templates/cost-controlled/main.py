@@ -8,7 +8,7 @@ Demonstrates how to manage API costs with budget limits and tracking.
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 @dataclass

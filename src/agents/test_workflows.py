@@ -13,7 +13,6 @@ from .workflows import (
     WorkflowTrigger,
     WorkflowExecutor,
     ContextManifest,
-    WorkflowType,
     get_workflow_registry,
     get_workflow_trigger,
     process_prompt_with_workflows,

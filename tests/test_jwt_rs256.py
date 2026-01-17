@@ -6,9 +6,8 @@ They should fail initially until the implementation is complete.
 import pytest
 import json
 from datetime import datetime, timedelta
-from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from jose import jwt, JWTError
 

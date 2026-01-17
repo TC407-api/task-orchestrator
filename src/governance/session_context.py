@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Set, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.governance.agent_identity import AgentCredential
-    from src.governance.session_risk_scoring import SessionRiskScore
+    pass
 
 
 @dataclass
