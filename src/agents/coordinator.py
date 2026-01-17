@@ -11,11 +11,16 @@ from .email_agent import EmailAgent, ExtractedTask, TaskPriority
 from .calendar_agent import CalendarAgent, ScheduledTask
 from .llm_mixin import LLMMixin
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..llm import ModelRouter as ModelRouterType
+
 try:
     from ..llm import ModelRouter, TaskType
 except ImportError:
-    ModelRouter = None
-    TaskType = None
+    ModelRouter = None  # type: ignore[misc, assignment]
+    TaskType = None  # type: ignore[misc, assignment]
 
 
 class TaskStatus(Enum):
@@ -97,7 +102,7 @@ class CoordinatorAgent(LLMMixin):
         self,
         email_agent: Optional[EmailAgent] = None,
         calendar_agent: Optional[CalendarAgent] = None,
-        llm_router: Optional["ModelRouter"] = None,
+        llm_router: Optional["ModelRouterType"] = None,
     ):
         self.email_agent = email_agent
         self.calendar_agent = calendar_agent

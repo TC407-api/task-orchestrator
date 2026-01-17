@@ -61,7 +61,7 @@ class ModelGrader(Grader):
         """Lazily initialize the Gemini client."""
         if self._client is None:
             try:
-                import google.generativeai as genai
+                import google.generativeai as genai  # type: ignore[import]
                 api_key = os.getenv("GOOGLE_API_KEY")
                 if api_key:
                     genai.configure(api_key=api_key)

@@ -2,8 +2,8 @@
 import os
 from typing import AsyncIterator, Optional
 
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig
+import google.generativeai as genai  # type: ignore[import]
+from google.generativeai.types import GenerationConfig  # type: ignore[import]
 
 from .base import LLMProvider, LLMResponse, Message, ModelCapability, ModelInfo
 from ..core.cost_tracker import Provider, get_cost_tracker

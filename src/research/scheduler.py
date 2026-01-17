@@ -48,20 +48,21 @@ class TopicRegistry:
         Returns:
             TopicRegistry instance
         """
+        file_path: Path
         if path is None:
-            path = Path.home() / ".claude" / "research" / "topics.json"
+            file_path = Path.home() / ".claude" / "research" / "topics.json"
         else:
-            path = Path(path)
+            file_path = Path(path)
 
-        if not path.exists():
-            logger.info(f"Creating new topic registry at {path}")
+        if not file_path.exists():
+            logger.info(f"Creating new topic registry at {file_path}")
             registry = cls()
-            registry._registry_path = path
+            registry._registry_path = file_path
             registry.save()
             return registry
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             schedule_data = data.get("schedule", {})
@@ -76,15 +77,15 @@ class TopicRegistry:
                 project_topics=data.get("project_topics", {}),
                 schedule=schedule,
             )
-            registry._registry_path = path
+            registry._registry_path = file_path
 
-            logger.info(f"Loaded {len(registry.all_topics)} topics from {path}")
+            logger.info(f"Loaded {len(registry.all_topics)} topics from {file_path}")
             return registry
 
         except Exception as e:
             logger.error(f"Error loading topic registry: {e}")
             registry = cls()
-            registry._registry_path = path
+            registry._registry_path = file_path
             return registry
 
     def save(self) -> None:
@@ -255,10 +256,11 @@ class ResearchScheduler:
             timeout_seconds=600,  # 10 minute timeout
         )
 
-        self._scheduled_task_id = await background_scheduler.schedule_task(task)
+        task_id: str = await background_scheduler.schedule_task(task)
+        self._scheduled_task_id = task_id
         logger.info(f"Scheduled daily research at {time_str}, next run: {next_run}")
 
-        return self._scheduled_task_id
+        return task_id
 
     async def run_now(
         self,

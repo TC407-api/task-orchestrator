@@ -1,13 +1,44 @@
 """LLM-powered methods for the coordinator agent."""
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
+
 
 if TYPE_CHECKING:
-    pass
+    from ..llm import ModelRouter
+    from .coordinator import Task
+
+
+class HasLLMAndTasks(Protocol):
+    """Protocol for classes that have llm and tasks attributes."""
+    llm: "ModelRouter | None"
+    tasks: dict[str, "Task"]
+
+    async def get_daily_summary(self) -> dict[str, Any]: ...
+    async def prioritize_tasks(self) -> list["Task"]: ...
 
 
 class LLMMixin:
-    """Mixin class providing LLM-powered methods for CoordinatorAgent."""
+    """Mixin class providing LLM-powered methods for CoordinatorAgent.
+
+    Note: This mixin expects the host class to have:
+    - llm: Optional[ModelRouter]
+    - tasks: dict[str, Task]
+    - get_daily_summary() method
+    - prioritize_tasks() method
+    """
+
+    # Type hints for mixin attributes (provided by host class)
+    llm: "ModelRouter | None"
+    tasks: dict[str, "Task"]
+
+    # Method stubs expected to be implemented by host class
+    async def get_daily_summary(self) -> dict[str, Any]:
+        """Get daily summary - implemented by host class."""
+        raise NotImplementedError
+
+    async def prioritize_tasks(self) -> list["Task"]:
+        """Get prioritized tasks - implemented by host class."""
+        raise NotImplementedError
 
     async def analyze_task_with_llm(self, task_id: str) -> dict:
         """
@@ -46,17 +77,15 @@ Provide:
 
 Respond in JSON format."""
 
+        # Build kwargs conditionally to avoid passing None for task_type
+        generate_kwargs: dict[str, Any] = {"temperature": 0.3}
         try:
             from ..llm import TaskType
-            task_type = TaskType.ANALYSIS
+            generate_kwargs["task_type"] = TaskType.ANALYSIS
         except ImportError:
-            task_type = None
+            pass
 
-        response = await self.llm.generate(
-            prompt,
-            task_type=task_type,
-            temperature=0.3,
-        )
+        response = await self.llm.generate(prompt, **generate_kwargs)
 
         try:
             return json.loads(response.content)
@@ -99,18 +128,15 @@ Consider:
 
 Respond with just the priority level: low, medium, high, or critical"""
 
+        # Build kwargs conditionally to avoid passing None for task_type
+        generate_kwargs: dict[str, Any] = {"prefer_fast": True, "temperature": 0.1}
         try:
             from ..llm import TaskType
-            task_type = TaskType.FAST_RESPONSE
+            generate_kwargs["task_type"] = TaskType.FAST_RESPONSE
         except ImportError:
-            task_type = None
+            pass
 
-        response = await self.llm.generate(
-            prompt,
-            task_type=task_type,
-            prefer_fast=True,
-            temperature=0.1,
-        )
+        response = await self.llm.generate(prompt, **generate_kwargs)
 
         priority_map = {
             "low": TaskPriority.LOW,
@@ -157,17 +183,15 @@ For each subtask provide:
 
 Respond as a JSON array of subtask objects."""
 
+        # Build kwargs conditionally to avoid passing None for task_type
+        generate_kwargs: dict[str, Any] = {"temperature": 0.5}
         try:
             from ..llm import TaskType
-            task_type = TaskType.REASONING
+            generate_kwargs["task_type"] = TaskType.REASONING
         except ImportError:
-            task_type = None
+            pass
 
-        response = await self.llm.generate(
-            prompt,
-            task_type=task_type,
-            temperature=0.5,
-        )
+        response = await self.llm.generate(prompt, **generate_kwargs)
 
         try:
             subtasks = json.loads(response.content)
@@ -219,16 +243,14 @@ Provide:
 
 Keep it concise and actionable."""
 
+        # Build kwargs conditionally to avoid passing None for task_type
+        generate_kwargs: dict[str, Any] = {"temperature": 0.7}
         try:
             from ..llm import TaskType
-            task_type = TaskType.CREATIVE
+            generate_kwargs["task_type"] = TaskType.CREATIVE
         except ImportError:
-            task_type = None
+            pass
 
-        response = await self.llm.generate(
-            prompt,
-            task_type=task_type,
-            temperature=0.7,
-        )
+        response = await self.llm.generate(prompt, **generate_kwargs)
 
         return response.content

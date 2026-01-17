@@ -22,7 +22,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Optional, TypeVar
+from typing import Awaitable, Callable, Optional, TypeVar
 
 T = TypeVar('T')
 
@@ -261,7 +261,7 @@ class CircuitBreaker:
 
     async def call_with_fallback(
         self,
-        func: Callable[..., T],
+        func: Callable[..., Awaitable[T]],
         fallback: T,
         *args,
         **kwargs,
@@ -370,7 +370,7 @@ def with_circuit_breaker(
 
             can_proceed, retry_after = breaker.is_available()
             if not can_proceed:
-                raise CircuitBreakerOpen(service_name, retry_after)
+                raise CircuitBreakerOpen(service_name, retry_after or 0.0)
 
             try:
                 result = await func(*args, **kwargs)
@@ -386,7 +386,7 @@ def with_circuit_breaker(
 
 def with_circuit_breaker_fallback(
     service_name: str,
-    fallback_value: T,
+    fallback_value: object,
     config: Optional[CircuitBreakerConfig] = None,
 ):
     """
@@ -432,7 +432,7 @@ def with_retry(
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            last_exception = None
+            last_exception: BaseException | None = None
 
             for attempt in range(max_retries + 1):
                 try:
@@ -449,7 +449,10 @@ def with_retry(
 
                     await asyncio.sleep(delay)
 
-            raise last_exception
+            if last_exception is not None:
+                raise last_exception
+            # Should never reach here, but satisfy type checker
+            raise RuntimeError("Retry exhausted with no exception captured")
 
         return wrapper
     return decorator

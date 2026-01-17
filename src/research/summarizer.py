@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-import google.generativeai as genai
+import google.generativeai as genai  # type: ignore[import]
 from dotenv import load_dotenv
 
 load_dotenv(".env.local")

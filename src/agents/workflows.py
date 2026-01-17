@@ -797,9 +797,9 @@ def workflow(
             # Initialize workflow state
             self._state = DecoratorWorkflowState(workflow_id=name)
             self._cancelled = False
-            self._start_time = None  # type: Optional[float]
-            self._end_time = None  # type: Optional[float]
-            self._steps_executed = 0  # type: int
+            self._start_time: float | None = None
+            self._end_time: float | None = None
+            self._steps_executed: int = 0
             # PERF: Limit concurrent LLM calls to prevent OOM/quota exhaustion
             self._concurrency_semaphore = asyncio.Semaphore(5)
 

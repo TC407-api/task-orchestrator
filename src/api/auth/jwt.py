@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.backends import default_backend
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -27,9 +28,10 @@ logger = structlog.get_logger(__name__)
 
 # Configuration - in production, load from environment/secrets manager
 # Default values for development only
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not JWT_SECRET_KEY:
+_jwt_secret = os.getenv("JWT_SECRET_KEY")
+if not _jwt_secret:
     raise ValueError("JWT_SECRET_KEY environment variable must be set")
+JWT_SECRET_KEY: str = _jwt_secret
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(
     os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30")
@@ -62,7 +64,7 @@ class TokenPayload(BaseModel):
 
 def create_access_token(
     subject: str,
-    scopes: list[str] = None,
+    scopes: Optional[list[str]] = None,
     expires_delta: Optional[timedelta] = None,
 ) -> str:
     """
@@ -107,16 +109,17 @@ def verify_token(token: str) -> TokenData:
     """
     payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
 
-    sub: str = payload.get("sub")
+    sub = payload.get("sub")
     if sub is None:
         raise JWTError("Token missing subject claim")
+    sub_str: str = str(sub)
 
     exp = payload.get("exp")
     exp_datetime = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
 
     scopes = payload.get("scopes", [])
 
-    return TokenData(sub=sub, exp=exp_datetime, scopes=scopes)
+    return TokenData(sub=sub_str, exp=exp_datetime, scopes=scopes)
 
 
 def hash_credential(plain_text: str) -> str:
