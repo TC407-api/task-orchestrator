@@ -1,10 +1,13 @@
 """Rate limiting and circuit breaker utilities."""
 import asyncio
+import logging
 import time
 from enum import Enum
 from functools import wraps
 from threading import Lock
 from typing import Callable, TypeVar, ParamSpec, Optional
+
+logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -117,7 +120,7 @@ class CircuitBreaker:
                     self._state = CircuitState.CLOSED
                     self._failure_count = 0
                     self._success_count = 0
-                    print("Circuit CLOSED - service recovered")
+                    logger.info("Circuit CLOSED - service recovered")
             elif self._state == CircuitState.CLOSED:
                 # Reset failure count on success
                 self._failure_count = 0
@@ -131,12 +134,12 @@ class CircuitBreaker:
             if self._state == CircuitState.HALF_OPEN:
                 # Failed during recovery test - reopen
                 self._state = CircuitState.OPEN
-                print("Circuit OPEN - recovery failed")
+                logger.warning("Circuit OPEN - recovery failed")
 
             elif self._state == CircuitState.CLOSED:
                 if self._failure_count >= self.failure_threshold:
                     self._state = CircuitState.OPEN
-                    print(f"Circuit OPEN - {self._failure_count} consecutive failures")
+                    logger.warning(f"Circuit OPEN - {self._failure_count} consecutive failures")
 
     def reset(self) -> None:
         """Manually reset the circuit breaker."""

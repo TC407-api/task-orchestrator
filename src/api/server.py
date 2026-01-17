@@ -1,9 +1,12 @@
 """FastAPI server for Task Orchestrator."""
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -43,8 +46,8 @@ async def lifespan(app: FastAPI):
     try:
         # Check if OAuth token exists before attempting to load credentials
         if not settings.oauth_token_path.exists():
-            print("[WARN] OAuth token not found. Starting without Google integration.")
-            print("       Run OAuth flow manually to enable Gmail/Calendar sync.")
+            logger.warning("OAuth token not found. Starting without Google integration.")
+            logger.warning("Run OAuth flow manually to enable Gmail/Calendar sync.")
             coordinator = CoordinatorAgent()
             yield
             return
@@ -66,21 +69,21 @@ async def lifespan(app: FastAPI):
             calendar_agent=calendar_agent,
         )
 
-        print("[OK] Task Orchestrator initialized with Google integration")
+        logger.info("Task Orchestrator initialized with Google integration")
         yield
 
     except FileNotFoundError as e:
-        print(f"[WARN] Starting without Google integration: {e}")
+        logger.warning(f"Starting without Google integration: {e}")
         coordinator = CoordinatorAgent()
         yield
 
     except Exception as e:
-        print(f"[WARN] Error initializing Google integration: {e}")
+        logger.warning(f"Error initializing Google integration: {e}")
         coordinator = CoordinatorAgent()
         yield
 
     finally:
-        print("Task Orchestrator shutting down")
+        logger.info("Task Orchestrator shutting down")
 
 
 app = FastAPI(
@@ -154,7 +157,8 @@ class ScheduleResponse(BaseModel):
 
 @app.get("/")
 @app.get("/health")
-async def health_check():
+@limiter.limit("300/minute")  # SECURITY: Mild rate limit to prevent DoS on health checks
+async def health_check(request: Request):
     """Health check endpoint - no authentication required."""
     return {
         "status": "healthy",

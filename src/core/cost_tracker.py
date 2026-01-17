@@ -160,7 +160,7 @@ class CostGovernor:
         return GovernanceStateRecord()
 
     def _save_state(self):
-        """Persist governance state."""
+        """Persist governance state (non-blocking via thread pool)."""
         data = {
             "state": self._state_record.state.value,
             "last_transition": self._state_record.last_transition.isoformat(),
@@ -169,7 +169,17 @@ class CostGovernor:
             "daily_spend_at_transition": self._state_record.daily_spend_at_transition,
             "monthly_spend_at_transition": self._state_record.monthly_spend_at_transition,
         }
-        self.state_path.write_text(json.dumps(data, indent=2))
+        # PERF: Use thread pool to avoid blocking event loop
+        self._write_file_async(self.state_path, json.dumps(data, indent=2))
+
+    def _write_file_async(self, path: Path, content: str):
+        """Write file in background thread to avoid blocking event loop."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, path.write_text, content)
+        except RuntimeError:
+            # No event loop running, write synchronously
+            path.write_text(content)
 
     @property
     def current_state(self) -> GovernanceState:
@@ -530,9 +540,16 @@ class CostTracker:
                 self._usage = []
 
     def _save_state(self):
-        """Persist usage data."""
+        """Persist usage data (non-blocking via thread pool)."""
         data = [r.to_dict() for r in self._usage]
-        self.usage_file.write_text(json.dumps(data, indent=2))
+        content = json.dumps(data, indent=2)
+        # PERF: Use thread pool to avoid blocking event loop
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, self.usage_file.write_text, content)
+        except RuntimeError:
+            # No event loop running, write synchronously
+            self.usage_file.write_text(content)
 
     def calculate_cost(
         self,
@@ -595,7 +612,7 @@ class CostTracker:
                 "timestamp": datetime.now().isoformat(),
             }
             self._alerts.append(alert)
-            print(f"⚠️  COST ALERT: {provider.value} at ${daily:.2f}/{budget.daily_limit_usd:.2f} daily")
+            logger.warning(f"COST ALERT: {provider.value} at ${daily:.2f}/{budget.daily_limit_usd:.2f} daily")
 
         # Check monthly limit
         if monthly >= budget.monthly_limit_usd * budget.alert_threshold_pct:
@@ -607,7 +624,7 @@ class CostTracker:
                 "timestamp": datetime.now().isoformat(),
             }
             self._alerts.append(alert)
-            print(f"⚠️  COST ALERT: {provider.value} at ${monthly:.2f}/{budget.monthly_limit_usd:.2f} monthly")
+            logger.warning(f"COST ALERT: {provider.value} at ${monthly:.2f}/{budget.monthly_limit_usd:.2f} monthly")
 
         # Update governance state based on total spending
         total_daily = self.get_total_daily_spend()

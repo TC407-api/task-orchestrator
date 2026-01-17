@@ -647,8 +647,7 @@ def process_prompt_with_workflows(
 import asyncio
 import inspect
 import time
-from typing import Callable, Union
-from functools import wraps
+from typing import Callable
 
 
 class StepStatus(str, Enum):
@@ -803,6 +802,8 @@ def workflow(
             self._start_time: Optional[float] = None
             self._end_time: Optional[float] = None
             self._steps_executed: int = 0
+            # PERF: Limit concurrent LLM calls to prevent OOM/quota exhaustion
+            self._concurrency_semaphore = asyncio.Semaphore(5)
 
         # Save original init if exists
         if hasattr(cls, "__init__") and cls.__init__ is not object.__init__:
@@ -869,13 +870,17 @@ def workflow(
                     # No steps ready - either blocked or done
                     break
 
-                # Execute ready steps in parallel
+                # Execute ready steps in parallel with concurrency limit
+                async def execute_with_semaphore(step_name, step_def):
+                    async with self._concurrency_semaphore:
+                        return await self._execute_step(step_name, step_def)
+
                 tasks = []
                 for step_name in ready_steps:
                     step_def = step_defs[step_name]
-                    tasks.append(self._execute_step(step_name, step_def))
+                    tasks.append(execute_with_semaphore(step_name, step_def))
 
-                # Wait for all parallel steps to complete
+                # Wait for all parallel steps to complete (max 5 concurrent)
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 # Process results

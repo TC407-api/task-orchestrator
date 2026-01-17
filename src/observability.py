@@ -10,11 +10,14 @@ Usage:
     async def tasks_sync_email(args):
         # ... your code
 """
+import logging
 import os
 import functools
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 # Try to import Langfuse, fall back to mock if not available
 try:
@@ -58,7 +61,7 @@ class Tracer:
                     host=host,
                 )
             except Exception as e:
-                print(f"[Grade5] Langfuse init failed: {e}")
+                logger.warning(f"Langfuse init failed: {e}")
                 self._client = None
 
     @property
