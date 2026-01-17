@@ -9,6 +9,7 @@ Provides context injection capabilities through @Symbol patterns:
 
 Each workflow triggers context injection for the appropriate archetype.
 """
+from __future__ import annotations
 
 import asyncio
 import glob as glob_module

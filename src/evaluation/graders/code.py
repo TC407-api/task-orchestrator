@@ -112,6 +112,7 @@ class JSONSchemaGrader(Grader):
                 )
 
         try:
+            assert jsonschema is not None  # Guarded by __init__ check
             jsonschema.validate(instance=data_to_validate, schema=self.schema)
             return self._make_result(True, 1.0, "Schema validation passed")
         except ValidationError as e:

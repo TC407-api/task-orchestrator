@@ -162,6 +162,7 @@ ModuleNotFoundError: No module named 'missing_module'
         capture.capture_from_output("", "Error 2", 1, "cmd2")
 
         assert len(capture.error_history) == 2
+        assert capture.last_error is not None
         assert capture.last_error.command == "cmd2"
 
 

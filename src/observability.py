@@ -15,9 +15,17 @@ import os
 import functools
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
+
+# Type-only import for Langfuse
+if TYPE_CHECKING:
+    from langfuse import Langfuse as LangfuseType
+    from langfuse.types import TraceContext as TraceContextType
+else:
+    LangfuseType = Any
+    TraceContextType = Any
 
 # Try to import Langfuse, fall back to mock if not available
 try:
@@ -27,8 +35,8 @@ try:
     _langfuse_available = True
 except ImportError:
     _langfuse_available = False
-    Langfuse = None
-    TraceContext = None
+    Langfuse = None  # type: ignore[misc, assignment]
+    TraceContext = None  # type: ignore[misc, assignment]
 
 
 class Tracer:
@@ -40,7 +48,7 @@ class Tracer:
     """
 
     def __init__(self):
-        self._client: Optional[Langfuse] = None
+        self._client: Optional["LangfuseType"] = None
         self._current_trace_id: Optional[str] = None
         self._initialize()
 
@@ -55,6 +63,7 @@ class Tracer:
 
         if public_key and secret_key:
             try:
+                assert Langfuse is not None  # Guarded by _langfuse_available check
                 self._client = Langfuse(
                     public_key=public_key,
                     secret_key=secret_key,
@@ -88,6 +97,7 @@ class Tracer:
         self._current_trace_id = trace_id
 
         # Build trace context
+        assert TraceContext is not None  # Guarded by _client check
         trace_context = TraceContext(trace_id=trace_id)
 
         # Combine metadata with user/session info
@@ -130,6 +140,7 @@ class Tracer:
             trace_context = {"trace_id": self._current_trace_id}
             if parent_span and hasattr(parent_span, "id"):
                 trace_context["parent_span_id"] = parent_span.id
+            assert TraceContext is not None  # Guarded by _client check
             kwargs["trace_context"] = TraceContext(**trace_context)
 
         return self._client.start_span(**kwargs)
@@ -155,6 +166,7 @@ class Tracer:
 
         # Add trace context if available
         if self._current_trace_id:
+            assert TraceContext is not None  # Guarded by _client check
             kwargs["trace_context"] = TraceContext(trace_id=self._current_trace_id)
 
         return self._client.start_generation(**kwargs)

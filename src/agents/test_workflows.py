@@ -97,8 +97,9 @@ class TestWorkflowRegistry:
             archetype="researcher",
         )
         registry.register(custom)
-        assert registry.get("@Custom") is not None
-        assert registry.get("@Custom").archetype == "researcher"
+        custom_workflow = registry.get("@Custom")
+        assert custom_workflow is not None
+        assert custom_workflow.archetype == "researcher"
 
     def test_registry_list_workflows(self):
         """Test listing all workflows."""

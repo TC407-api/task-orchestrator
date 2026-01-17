@@ -215,6 +215,9 @@ class PatternMatcher:
         operation: str,
     ) -> List[MatchedPattern]:
         """Query Graphiti for semantic matches."""
+        if self._graphiti is None:
+            return []
+
         try:
             results = await self._graphiti.search_memory_facts(
                 query=f"failure pattern for {operation}: {prompt[:100]}",

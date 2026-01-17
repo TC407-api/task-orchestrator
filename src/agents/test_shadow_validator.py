@@ -211,7 +211,7 @@ class TestJavaScriptValidator:
 
         issues = validator.validate(code)
 
-        bracket_issues = [i for i in issues if "bracket" in i.code.lower()]
+        bracket_issues = [i for i in issues if i.code and "bracket" in i.code.lower()]
         assert len(bracket_issues) > 0
 
     def test_comment_skipping(self):

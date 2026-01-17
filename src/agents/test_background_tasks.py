@@ -240,7 +240,7 @@ async def test_task_timeout(scheduler):
         func=slow_func,
         schedule_type=TaskScheduleType.ONE_TIME,
         run_at=datetime.now() + timedelta(milliseconds=100),
-        timeout_seconds=0.1,
+        timeout_seconds=1,  # Must be int, use 1 second timeout
         max_retries=1,
     )
 

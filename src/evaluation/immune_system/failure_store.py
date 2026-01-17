@@ -203,6 +203,9 @@ class FailurePatternStore:
 
     async def _store_to_graphiti(self, pattern: FailurePattern) -> None:
         """Store pattern to Graphiti knowledge graph."""
+        if self._graphiti is None:
+            return
+
         try:
             episode_body = json.dumps({
                 "type": "failure_pattern",

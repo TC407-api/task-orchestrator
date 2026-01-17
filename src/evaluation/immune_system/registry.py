@@ -162,6 +162,9 @@ class RegistryManager:
 
     def _load_local_config(self) -> None:
         """Loads the static namespaces.json file."""
+        if self.config_path is None:
+            return
+
         try:
             config = RegistryConfig.load_from_file(self.config_path)
             for p in config.projects:

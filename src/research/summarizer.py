@@ -55,8 +55,8 @@ class ResearchSummarizer:
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
 
         if self.api_key:
-            genai.configure(api_key=self.api_key)
-            self._genai_model = genai.GenerativeModel(model)
+            genai.configure(api_key=self.api_key)  # type: ignore[attr-defined]
+            self._genai_model = genai.GenerativeModel(model)  # type: ignore[attr-defined]
         else:
             self._genai_model = None
             logger.warning("No Google API key configured - summarization disabled")

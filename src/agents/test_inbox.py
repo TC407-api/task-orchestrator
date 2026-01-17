@@ -232,6 +232,7 @@ class TestUniversalInbox:
         )
 
         assert approved.status == ApprovalStatus.APPROVED
+        assert approved.execution_result is not None
         assert "Email sent" in approved.execution_result
 
     async def test_reject_action(self):
@@ -421,6 +422,7 @@ class TestWorkflows:
 
         # 3. Get full action details
         action_details = inbox.get_action(action.action_id)
+        assert action_details is not None
         assert action_details.description == "Delete production database backup"
 
         # 4. Approve the action

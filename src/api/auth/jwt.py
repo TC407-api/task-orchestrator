@@ -334,6 +334,11 @@ class JWTKeyManager:
                 backend=default_backend(),
             )
 
+            # Only process RSA keys for JWKS (skip Ed25519, etc.)
+            if not isinstance(public_key, RSAPublicKey):
+                logger.warning("jwks_skip_non_rsa_key", kid=kid)
+                continue
+
             # Get RSA numbers
             numbers = public_key.public_numbers()
 
