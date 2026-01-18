@@ -1,6 +1,21 @@
 # Task Orchestrator MCP Server
 
-A production-grade MCP (Model Context Protocol) server for orchestrating AI agents with comprehensive evaluation, self-healing, and cost management capabilities.
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-680%2B-brightgreen.svg)](tests/)
+[![MCP](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.io/)
+
+**Production safety for Claude Code agents** - catches failures before your users do, including hallucinations, not just crashes.
+
+## The Problem
+
+> "Less than 1 in 3 teams are satisfied with their AI agent guardrails and observability" - [Cleanlab AI Agents Report 2025](https://cleanlab.ai/ai-agents-in-production-2025/)
+
+Most AI agents fail silently in production. Task Orchestrator adds an **immune system** to Claude Code that:
+- Detects **semantic failures** (hallucinations, wrong answers) not just crashes
+- **Learns from mistakes** and prevents the same error twice
+- Provides **human-in-the-loop** controls for sensitive operations
+- Works with **any LLM provider** (Gemini, OpenAI, or bring your own)
 
 ## Features
 
@@ -14,7 +29,37 @@ A production-grade MCP (Model Context Protocol) server for orchestrating AI agen
 - **Dynamic Tool Loading** - Lazy load tool categories to reduce context window usage (88% reduction)
 - **Human-in-the-Loop Controls** - Operation classification for safe, approval-required, and blocked actions
 
-## Installation
+## Quick Start (5 minutes)
+
+```bash
+# 1. Clone and install
+git clone https://github.com/yourusername/task-orchestrator.git
+cd task-orchestrator && pip install -r requirements.txt
+
+# 2. Configure (add your API key)
+cp .env.example .env.local
+# Edit .env.local: Add GOOGLE_API_KEY or OPENAI_API_KEY
+
+# 3. Add to Claude Code
+claude mcp add task-orchestrator python mcp_server.py
+
+# 4. Restart Claude Code and verify
+# Try: mcp__task-orchestrator__healing_status
+```
+
+**Need detailed setup?** See [Claude Code Setup Guide](docs/CLAUDE_CODE_SETUP.md)
+
+### LLM Provider Options
+
+Task Orchestrator works with multiple providers:
+
+| Provider | Environment Variable | Notes |
+|----------|---------------------|-------|
+| **Gemini** (Recommended) | `GOOGLE_API_KEY` | Free tier available, default |
+| OpenAI | `OPENAI_API_KEY` | GPT-4o, GPT-4o-mini |
+| Custom | Implement `LLMProvider` | Any provider you want |
+
+## Installation (Development)
 
 ```bash
 # Clone repository
@@ -23,21 +68,14 @@ cd task-orchestrator
 
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Set environment variables
-export JWT_SECRET_KEY=your-secret-key
-export GEMINI_API_KEY=your-gemini-key
-```
-
-## Quick Start
-
-```bash
-# Run the MCP server
-python -m src.mcp.server
+# Configure environment
+cp .env.example .env.local
+# Edit .env.local with your keys
 
 # Run tests
 JWT_SECRET_KEY=test123 python -m pytest tests/ -v
@@ -291,13 +329,7 @@ python -m pytest tests/test_phase8.py -v
 python -m pytest tests/ --cov=src --cov-report=html
 ```
 
-**Test Counts:**
-- Evaluation tests: 37
-- Immune system tests: 22
-- CI/CD integration tests: 19
-- Phase 8 tests: 25
-- Dynamic tool loading tests: 26
-- **Total: 129 tests**
+**Test Counts:** 680+ tests across all modules
 
 ## CI/CD
 
@@ -319,10 +351,27 @@ Environment variables:
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key | No |
 | `LANGFUSE_HOST` | Langfuse server URL | No (default: localhost:3000) |
 
+## Why Task Orchestrator?
+
+| Feature | Task Orchestrator | LangGraph | CrewAI | AutoGen |
+|---------|------------------|-----------|--------|---------|
+| Semantic failure detection | **Yes** | No | No | No |
+| ML-powered learning | **Yes** | No | No | No |
+| Cross-project federation | **Yes** | No | No | No |
+| MCP native | **Yes** | No | No | No |
+| Human-in-the-loop | **Yes** | Partial | Partial | Partial |
+| Cost tracking | **Yes** | No | Enterprise | No |
+| Self-healing | **Yes** | No | No | No |
+| Multi-provider LLM | **Yes** | Partial | Partial | Yes |
+| TTT Memory (O(1) lookup) | **Yes** | No | No | No |
+
+**Key differentiator:** Task Orchestrator catches **semantic failures** (hallucinations, wrong answers) using an immune system that learns from mistakes - not just crashes and exceptions.
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
+| [Claude Code Setup](docs/CLAUDE_CODE_SETUP.md) | Quick start guide for Claude Code users |
 | [Phase 10 Observability](docs/phase10-observability.md) | Langfuse + Graphiti integration architecture |
 | [PRD: Eval System](docs/PRD-eval-system.md) | Product requirements for evaluation system |
 

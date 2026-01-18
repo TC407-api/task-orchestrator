@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "task-orchestrator": {
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "cwd": "/path/to/task-orchestrator",
+      "env": {
+        "PYTHONPATH": "/path/to/task-orchestrator",
+        "GOOGLE_API_KEY": "${GOOGLE_API_KEY}",
+        "JWT_SECRET_KEY": "${JWT_SECRET_KEY}",
+        "TASK_ORCHESTRATOR_LICENSE": "${TASK_ORCHESTRATOR_LICENSE}"
+      }
+    }
+  }
+}
