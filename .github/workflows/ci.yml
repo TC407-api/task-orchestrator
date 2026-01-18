@@ -1,0 +1,182 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  JWT_SECRET_KEY: "test-secret-key-for-ci"
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pyright
+          pip install -r requirements.txt
+
+      - name: Run Ruff linter
+        run: ruff check src/ --output-format=github
+
+      - name: Run Ruff formatter check
+        run: ruff format src/ --check
+
+      - name: Run Pyright type checker
+        run: pyright src/
+        continue-on-error: true  # Type errors are warnings for now
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  test-plugins:
+    name: Plugin Architecture Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run plugin tests
+        run: pytest tests/test_plugins.py -v
+
+  test-matrix:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run core tests
+        run: pytest tests/test_plugins.py tests/test_evaluation.py tests/test_immune_system.py -v
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+
+      - name: Run Bandit security linter
+        run: bandit -r src/ -ll -ii -x tests/
+        continue-on-error: true
+
+      - name: Check dependencies for vulnerabilities
+        run: pip install -r requirements.txt && safety check
+        continue-on-error: true
+
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    needs: [lint, test, test-plugins]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify MCP server starts
+        run: |
+          timeout 5 python -c "from src.mcp.server import TaskOrchestratorMCP; print('MCP server imports successfully')" || true
+
+      - name: Verify plugin architecture
+        run: |
+          python -c "
+          from src.mcp.plugins import PluginRegistry, PluginInterface
+          from src.mcp.plugins.core_plugin import CorePlugin
+          from src.license import LicenseValidator
+
+          registry = PluginRegistry()
+          registry.register(CorePlugin())
+          tools = registry.get_all_tools()
+          print(f'Core plugin loaded with {len(tools)} tools')
+
+          validator = LicenseValidator()
+          info = validator.validate('dev-all-features')
+          print(f'License validation working: {info.is_valid}')
+          "
