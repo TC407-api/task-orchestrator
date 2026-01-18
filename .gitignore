@@ -39,3 +39,6 @@ build/
 # Logs
 *.log
 logs/
+
+# Marketing/Launch materials (keep local only)
+launch/
