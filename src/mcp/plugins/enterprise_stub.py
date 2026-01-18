@@ -18,7 +18,7 @@ To use enterprise features:
 from typing import Any, Callable, Dict, List
 
 from .base import PluginInterface, PluginTier
-from ..license import LicenseValidator, check_feature_access
+from ..license import LicenseValidator
 
 
 class EnterprisePluginBase(PluginInterface):

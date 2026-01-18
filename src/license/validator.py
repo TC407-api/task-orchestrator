@@ -84,7 +84,7 @@ CDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/EXAMPLE_PUBLIC_KEY==
     def _check_jwt_available(self) -> bool:
         """Check if PyJWT is available."""
         try:
-            import jwt
+            import jwt  # noqa: F401
             return True
         except ImportError:
             return False

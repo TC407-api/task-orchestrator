@@ -1,5 +1,4 @@
 """Plugin registry for Task Orchestrator MCP server."""
-import os
 from typing import Any, Callable, Dict, List, Optional
 
 from .base import PluginInterface, PluginTier

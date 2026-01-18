@@ -1,10 +1,9 @@
 """Tests for the plugin architecture."""
-import pytest
 from typing import Any, Callable, Dict, List
 
 from src.mcp.plugins import PluginInterface, PluginRegistry, PluginTier
 from src.mcp.plugins.core_plugin import CorePlugin, CORE_TOOL_DEFINITIONS
-from src.license import LicenseValidator, LicenseInfo, LicenseStatus
+from src.license import LicenseValidator, LicenseStatus
 
 
 class MockPlugin(PluginInterface):
