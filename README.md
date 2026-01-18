@@ -1,5 +1,6 @@
 # Task Orchestrator MCP Server
 
+[![CI](https://github.com/TC407-api/task-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/TC407-api/task-orchestrator/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-680%2B-brightgreen.svg)](tests/)
@@ -33,7 +34,7 @@ Most AI agents fail silently in production. Task Orchestrator adds an **immune s
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/yourusername/task-orchestrator.git
+git clone https://github.com/TC407-api/task-orchestrator.git
 cd task-orchestrator && pip install -r requirements.txt
 
 # 2. Configure (add your API key)
@@ -63,7 +64,7 @@ Task Orchestrator works with multiple providers:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/task-orchestrator.git
+git clone https://github.com/TC407-api/task-orchestrator.git
 cd task-orchestrator
 
 # Create virtual environment

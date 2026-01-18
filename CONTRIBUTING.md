@@ -10,7 +10,7 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ### Reporting Bugs
 
-1. **Check existing issues** - Search the [issue tracker](https://github.com/yourusername/task-orchestrator/issues) to avoid duplicates.
+1. **Check existing issues** - Search the [issue tracker](https://github.com/TC407-api/task-orchestrator/issues) to avoid duplicates.
 2. **Create a detailed report** including:
    - Python version and OS
    - Steps to reproduce

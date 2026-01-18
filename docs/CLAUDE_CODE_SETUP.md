@@ -14,7 +14,7 @@ This guide walks you through adding Task Orchestrator to your Claude Code setup.
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourusername/task-orchestrator.git
+git clone https://github.com/TC407-api/task-orchestrator.git
 
 # 2. Install dependencies
 cd task-orchestrator && pip install -r requirements.txt
@@ -32,7 +32,7 @@ claude mcp add task-orchestrator python mcp_server.py
 ### Step 1: Clone and Install
 
 ```bash
-git clone https://github.com/yourusername/task-orchestrator.git
+git clone https://github.com/TC407-api/task-orchestrator.git
 cd task-orchestrator
 
 # Create virtual environment (recommended)
@@ -233,6 +233,6 @@ See `examples/hooks/` for examples.
 
 ## Need Help?
 
-- [GitHub Issues](https://github.com/yourusername/task-orchestrator/issues)
-- [Documentation](https://github.com/yourusername/task-orchestrator/tree/main/docs)
+- [GitHub Issues](https://github.com/TC407-api/task-orchestrator/issues)
+- [Documentation](https://github.com/TC407-api/task-orchestrator/tree/main/docs)
 - [Contributing Guide](../CONTRIBUTING.md)

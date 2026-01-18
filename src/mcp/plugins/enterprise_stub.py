@@ -123,7 +123,7 @@ class FederationPluginStub(EnterprisePluginBase):
         return {
             "error": "Enterprise feature not available",
             "message": "This feature requires task-orchestrator-enterprise. "
-                      "See https://github.com/yourusername/task-orchestrator for licensing info.",
+                      "See https://github.com/TC407-api/task-orchestrator for licensing info.",
         }
 
 
