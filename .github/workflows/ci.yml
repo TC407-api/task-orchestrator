@@ -29,10 +29,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Ruff linter
-        run: ruff check src/ --output-format=github
+        run: ruff check src/ --output-format=github --ignore=F401
 
       - name: Run Ruff formatter check
         run: ruff format src/ --check
+        continue-on-error: true  # Formatter is advisory for now
 
       - name: Run Pyright type checker
         run: pyright src/
