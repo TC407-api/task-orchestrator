@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-680%2B-brightgreen.svg)](tests/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.io/)
+[![Website](https://img.shields.io/badge/website-live-blue.svg)](https://task-orchestrator-landing.vercel.app)
 
 **Production safety for Claude Code agents** - catches failures before your users do, including hallucinations, not just crashes.
 
@@ -347,7 +348,7 @@ Environment variables:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `JWT_SECRET_KEY` | Secret for JWT tokens | Yes |
-| `GEMINI_API_KEY` | Google Gemini API key | Yes |
+| `GOOGLE_API_KEY` | Google Gemini API key | Yes (or OPENAI_API_KEY) |
 | `LANGFUSE_SECRET_KEY` | Langfuse observability | No |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key | No |
 | `LANGFUSE_HOST` | Langfuse server URL | No (default: localhost:3000) |
@@ -364,7 +365,7 @@ Environment variables:
 | Cost tracking | **Yes** | No | Enterprise | No |
 | Self-healing | **Yes** | No | No | No |
 | Multi-provider LLM | **Yes** | Partial | Partial | Yes |
-| TTT Memory (O(1) lookup) | **Yes** | No | No | No |
+| Failure pattern memory | **Yes** | No | No | No |
 
 **Key differentiator:** Task Orchestrator catches **semantic failures** (hallucinations, wrong answers) using an immune system that learns from mistakes - not just crashes and exceptions.
 
@@ -373,7 +374,6 @@ Environment variables:
 | Document | Description |
 |----------|-------------|
 | [Claude Code Setup](docs/CLAUDE_CODE_SETUP.md) | Quick start guide for Claude Code users |
-| [Phase 10 Observability](docs/phase10-observability.md) | Langfuse + Graphiti integration architecture |
 | [PRD: Eval System](docs/PRD-eval-system.md) | Product requirements for evaluation system |
 
 ## Architecture
@@ -415,8 +415,6 @@ Environment variables:
 **Integration Methods:**
 - **Langfuse**: Python SDK with `@trace_*` decorators (automatic tracing)
 - **Graphiti**: MCP tools from Claude Code (pattern storage/retrieval)
-
-See [Phase 10 Observability](docs/phase10-observability.md) for detailed architecture.
 
 ## License
 
