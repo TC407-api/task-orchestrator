@@ -1,11 +1,12 @@
 """
-Graphiti Immune System for Task Orchestrator.
+Immune System for Task Orchestrator.
 
 This module provides a self-learning system that:
-- Stores evaluation failures in Graphiti
+- Stores evaluation failures in Titan Memory (preferred) or Graphiti (legacy)
 - Matches new prompts against past failure patterns
 - Applies protective guardrails to prevent similar failures
 - Tracks effectiveness and provides health metrics
+- FR-1: Integrates with Titan's utility tracking for closed-loop learning
 
 Usage:
     from evaluation.immune_system import ImmuneSystem, get_immune_system
@@ -32,6 +33,12 @@ from .failure_store import (
     FailurePattern,
     FailurePatternStore,
     FAILURE_GROUP_ID,
+    TITAN_FAILURE_TAGS,
+)
+from .titan_client import (
+    TitanClient,
+    create_titan_client,
+    IMMUNE_PROJECT_ID,
 )
 from .pattern_matcher import (
     MatchedPattern,
@@ -91,6 +98,11 @@ __all__ = [
     "FailurePattern",
     "FailurePatternStore",
     "FAILURE_GROUP_ID",
+    "TITAN_FAILURE_TAGS",
+    # Titan Client (preferred backend)
+    "TitanClient",
+    "create_titan_client",
+    "IMMUNE_PROJECT_ID",
     # Pattern Matcher
     "MatchedPattern",
     "PatternMatcher",

@@ -1,33 +1,68 @@
-"""Audit workflow for maintaining persistent memory of architectural decisions and past errors."""
+"""
+Audit workflow for maintaining persistent memory of architectural decisions and past errors.
+
+Phase 5: Supports Titan Memory (preferred) for persistence with markdown backup.
+FR-1: Integrates with Titan's utility tracking for decision effectiveness.
+"""
 import json
+import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import re
+
+if TYPE_CHECKING:
+    from evaluation.immune_system.titan_client import TitanClient
+
+logger = logging.getLogger(__name__)
+
+# Tags for Titan storage
+TITAN_AUDIT_TAGS = {
+    "decision": ["audit", "decision"],
+    "error": ["audit", "error"],
+    "pattern": ["audit", "pattern"],
+}
 
 
 class AuditWorkflow:
     """
     Manages persistent audit history for agent decisions and error patterns.
 
+    Phase 5: Supports Titan Memory for persistence with markdown backup.
+
     Responsibilities:
-    - Load and maintain audit.md from project root
+    - Load and maintain audit.md from project root (backup)
+    - Store entries in Titan Memory (preferred, when available)
     - Inject audit history into agent system prompts
     - Record new errors and fixes after agent execution
     - Query historical decisions and patterns for conflict detection
     """
 
-    def __init__(self, project_root: Optional[str] = None):
+    def __init__(
+        self,
+        project_root: Optional[str] = None,
+        titan_client: Optional["TitanClient"] = None,
+    ):
         """
         Initialize the audit workflow.
 
         Args:
             project_root: Path to project root. If None, uses current directory.
+            titan_client: Optional Titan client for persistent storage (preferred).
         """
         self.project_root = Path(project_root or os.getcwd())
         self.audit_file = self.project_root / "audit.md"
         self.audit_data = self._load_or_initialize()
+
+        # Titan support (Phase 5)
+        self._titan_client = titan_client
+        self._use_titan = titan_client is not None
+
+        if self._use_titan:
+            logger.info("AuditWorkflow using Titan Memory for persistence")
+        else:
+            logger.debug("AuditWorkflow using markdown file only")
 
     def _load_or_initialize(self) -> dict:
         """
@@ -238,18 +273,75 @@ class AuditWorkflow:
             title = f"Entry {len(self.audit_data[section_key]) + 1}"
 
         # Build entry
+        timestamp = datetime.now(timezone.utc).isoformat()
         entry = {
             "title": title,
             "content": content,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": timestamp,
             "metadata": metadata or {},
         }
 
         # Add to appropriate section
         self.audit_data[section_key].append(entry)
 
-        # Persist to file
+        # Persist to Titan (preferred) and markdown (backup)
+        if self._use_titan and self._titan_client:
+            self._store_to_titan(entry_type, entry)
+
+        # Always persist to markdown as backup
         self._write_audit_md()
+
+    def _store_to_titan(self, entry_type: str, entry: dict) -> None:
+        """
+        Store audit entry to Titan Memory (Phase 5).
+
+        Args:
+            entry_type: Type of entry ('decision', 'error', 'pattern')
+            entry: Entry dict with title, content, timestamp, metadata
+        """
+        import asyncio
+
+        if not self._titan_client:
+            return
+
+        try:
+            # Build content for Titan storage
+            titan_content = json.dumps({
+                "type": f"audit_{entry_type}",
+                "title": entry.get("title", ""),
+                "content": entry.get("content", ""),
+                "timestamp": entry.get("timestamp", ""),
+                "metadata": entry.get("metadata", {}),
+                "project": str(self.project_root),
+            })
+
+            # Get tags for this entry type
+            tags = TITAN_AUDIT_TAGS.get(entry_type, ["audit"])
+
+            # Store asynchronously
+            async def store():
+                return await self._titan_client.add_memory(
+                    content=titan_content,
+                    tags=tags,
+                    layer=5,  # Episodic layer for audit entries
+                )
+
+            # Run the async operation
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # In async context, create task
+                    asyncio.create_task(store())
+                else:
+                    loop.run_until_complete(store())
+            except RuntimeError:
+                # No event loop, create one
+                asyncio.run(store())
+
+            logger.debug(f"Stored audit {entry_type} to Titan: {entry.get('title', '')}")
+
+        except Exception as e:
+            logger.warning(f"Failed to store audit entry to Titan: {e}")
 
     def append_error(
         self,

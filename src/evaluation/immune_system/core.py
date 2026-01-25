@@ -4,7 +4,8 @@ Core Immune System for Task Orchestrator.
 This module provides the main ImmuneSystem class that coordinates
 failure storage, pattern matching, and prompt guardrails.
 
-Includes Graphiti persistence for cross-session memory (Phase 7).
+Supports Titan Memory (preferred) or Graphiti (legacy) for persistence.
+FR-1: Integrates with Titan's utility tracking for closed-loop learning.
 """
 
 import asyncio
@@ -12,11 +13,14 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from .failure_store import FailurePattern, FailurePatternStore
 from .pattern_matcher import PatternMatcher
 from .guardrails import PromptGuardrails
+
+if TYPE_CHECKING:
+    from .titan_client import TitanClient
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +92,7 @@ class ImmuneSystem:
     def __init__(
         self,
         graphiti_client: Optional[Any] = None,
+        titan_client: Optional["TitanClient"] = None,
         risk_threshold: float = 0.5,
         auto_apply_guardrails: bool = True,
         block_high_risk: bool = False,
@@ -97,14 +102,22 @@ class ImmuneSystem:
         Initialize the immune system.
 
         Args:
-            graphiti_client: Optional Graphiti MCP client for persistence
+            graphiti_client: Optional Graphiti MCP client for persistence (legacy)
+            titan_client: Optional Titan client for persistence (preferred)
             risk_threshold: Minimum risk to trigger guardrails (0.0-1.0)
             auto_apply_guardrails: Whether to auto-apply guardrails
             block_high_risk: Whether to block very high risk prompts
             high_risk_threshold: Risk score above which to block (if enabled)
         """
-        # Initialize components
-        self._failure_store = FailurePatternStore(graphiti_client)
+        # Store Titan client for utility feedback
+        self._titan_client = titan_client
+        self._titan_available = titan_client is not None
+
+        # Initialize components - Titan is preferred over Graphiti
+        self._failure_store = FailurePatternStore(
+            graphiti_client=graphiti_client if not self._titan_available else None,
+            titan_client=titan_client,
+        )
         self._pattern_matcher = PatternMatcher(
             failure_store=self._failure_store,
             graphiti_client=graphiti_client,
@@ -119,7 +132,7 @@ class ImmuneSystem:
         self._block_high_risk = block_high_risk
         self._high_risk_threshold = high_risk_threshold
         self._graphiti_client = graphiti_client
-        self._graphiti_available = graphiti_client is not None
+        self._graphiti_available = graphiti_client is not None and not self._titan_available
         self._synced_pattern_ids: Set[str] = set()
         self._stats = {
             "pre_spawn_checks": 0,
@@ -129,12 +142,15 @@ class ImmuneSystem:
             "graphiti_syncs": 0,
             "graphiti_loads": 0,
             "graphiti_persists": 0,
+            "titan_stores": 0,
+            "titan_feedback": 0,
         }
 
+        backend = "Titan" if self._titan_available else ("Graphiti" if self._graphiti_available else "local")
         logger.info(
             f"ImmuneSystem initialized (risk_threshold={risk_threshold}, "
             f"auto_apply={auto_apply_guardrails}, block_high_risk={block_high_risk}, "
-            f"graphiti_available={self._graphiti_available})"
+            f"backend={backend})"
         )
 
     async def pre_spawn_check(
@@ -476,13 +492,17 @@ _immune_system: Optional[ImmuneSystem] = None
 
 def get_immune_system(
     graphiti_client: Optional[Any] = None,
+    titan_client: Optional["TitanClient"] = None,
+    auto_create_titan: bool = True,
     **kwargs,
 ) -> ImmuneSystem:
     """
     Get or create the global immune system instance.
 
     Args:
-        graphiti_client: Optional Graphiti client
+        graphiti_client: Optional Graphiti client (legacy)
+        titan_client: Optional Titan client (preferred)
+        auto_create_titan: If True, try to auto-create Titan client when available
         **kwargs: Additional arguments for ImmuneSystem
 
     Returns:
@@ -490,7 +510,22 @@ def get_immune_system(
     """
     global _immune_system
     if _immune_system is None:
-        _immune_system = ImmuneSystem(graphiti_client, **kwargs)
+        # Try to auto-create Titan client if not provided and requested
+        if titan_client is None and auto_create_titan:
+            try:
+                from .titan_client import create_titan_client
+                candidate = create_titan_client()
+                if candidate.is_available():
+                    titan_client = candidate
+                    logger.info("Auto-created Titan client for immune system")
+            except Exception as e:
+                logger.debug(f"Could not auto-create Titan client: {e}")
+
+        _immune_system = ImmuneSystem(
+            graphiti_client=graphiti_client,
+            titan_client=titan_client,
+            **kwargs,
+        )
     return _immune_system
 
 

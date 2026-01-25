@@ -1,22 +1,34 @@
 """
-Failure Pattern Storage for Graphiti Immune System.
+Failure Pattern Storage for Immune System.
 
-This module stores evaluation failures in Graphiti for later retrieval
-and pattern matching, enabling the system to learn from past mistakes.
+This module stores evaluation failures for later retrieval and pattern matching,
+enabling the system to learn from past mistakes.
+
+Supports two backends:
+- Titan Memory (preferred): Uses Titan's 5-layer cognitive system with utility tracking
+- Graphiti (legacy): Uses Graphiti knowledge graph
+
+FR-1: Integrates with Titan's utility tracking for closed-loop learning.
 """
 
 import heapq
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from hashlib import sha256
+
+if TYPE_CHECKING:
+    from .titan_client import TitanClient
 
 logger = logging.getLogger(__name__)
 
-# Group ID for task orchestrator failures in Graphiti
+# Group ID for task orchestrator failures in Graphiti (legacy)
 FAILURE_GROUP_ID = "project_task_orchestrator_failures"
+
+# Tags for Titan Memory storage
+TITAN_FAILURE_TAGS = ["failure", "immune", "pattern"]
 
 
 @dataclass
@@ -42,7 +54,7 @@ class FailurePattern:
     output_summary: str
     grader_scores: Dict[str, float]
     context: Dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     occurrence_count: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
@@ -77,26 +89,38 @@ class FailurePattern:
 
 class FailurePatternStore:
     """
-    Stores and retrieves failure patterns from Graphiti.
+    Stores and retrieves failure patterns.
 
     This class handles:
-    - Recording new failures to Graphiti
+    - Recording new failures to Titan Memory (preferred) or Graphiti (legacy)
     - Deduplicating similar failures
     - Generating failure summaries for storage
     - Retrieving failure patterns by type or operation
+
+    FR-1: When using Titan backend, failures are stored with utility tracking
+    for closed-loop learning.
     """
 
-    def __init__(self, graphiti_client: Optional[Any] = None):
+    def __init__(
+        self,
+        graphiti_client: Optional[Any] = None,
+        titan_client: Optional["TitanClient"] = None,
+    ):
         """
         Initialize the failure store.
 
         Args:
-            graphiti_client: Optional Graphiti client for storage.
-                           If None, will use local file-based storage.
+            graphiti_client: Optional Graphiti client for storage (legacy).
+            titan_client: Optional Titan client for storage (preferred).
+                         If both are provided, Titan is used.
+                         If None, will use local cache only.
         """
         self._graphiti = graphiti_client
+        self._titan = titan_client
         self._local_cache: Dict[str, FailurePattern] = {}
-        self._use_graphiti = graphiti_client is not None
+        # Prefer Titan over Graphiti
+        self._use_titan = titan_client is not None
+        self._use_graphiti = graphiti_client is not None and not self._use_titan
         # Min-heap of (created_at, id) for O(log n) recency tracking.
         # Values are negated so the heap acts as a max-heap (most-recent first).
         self._recency_heap: List[tuple] = []
@@ -200,12 +224,54 @@ class FailurePatternStore:
         # Push to recency heap (negate timestamp for max-heap behaviour)
         heapq.heappush(self._recency_heap, (-pattern.created_at.timestamp(), failure_id))
 
-        # Store in Graphiti if available
-        if self._use_graphiti:
+        # Store in Titan (preferred) or Graphiti (legacy)
+        if self._use_titan:
+            await self._store_to_titan(pattern)
+        elif self._use_graphiti:
             await self._store_to_graphiti(pattern)
 
         logger.info(f"Stored failure pattern: {failure_id} ({failure_type})")
         return pattern
+
+    async def _store_to_titan(self, pattern: FailurePattern) -> None:
+        """
+        Store pattern to Titan Memory.
+
+        FR-1: Stores in Layer 5 (episodic) with tags for filtering.
+        """
+        if self._titan is None:
+            return
+
+        try:
+            # Build content string for Titan
+            content = json.dumps({
+                "type": "failure_pattern",
+                "id": pattern.id,
+                "failure_type": pattern.failure_type,
+                "operation": pattern.operation,
+                "input_summary": pattern.input_summary,
+                "output_summary": pattern.output_summary,
+                "grader_scores": pattern.grader_scores,
+                "context": pattern.context,
+                "created_at": pattern.created_at.isoformat(),
+            })
+
+            # Tags for filtering: base tags + operation + failure type
+            tags = TITAN_FAILURE_TAGS + [pattern.operation, pattern.failure_type]
+
+            result = await self._titan.add_memory(
+                content=content,
+                tags=tags,
+                layer=5,  # Episodic layer for failures
+            )
+
+            if result.get("stored"):
+                logger.debug(f"Stored pattern {pattern.id} to Titan: {result.get('id')}")
+            else:
+                logger.warning(f"Titan storage may have failed: {result}")
+
+        except Exception as e:
+            logger.error(f"Failed to store to Titan: {e}")
 
     async def _store_to_graphiti(self, pattern: FailurePattern) -> None:
         """Store pattern to Graphiti knowledge graph."""
@@ -331,4 +397,5 @@ __all__ = [
     "FailurePattern",
     "FailurePatternStore",
     "FAILURE_GROUP_ID",
+    "TITAN_FAILURE_TAGS",
 ]

@@ -2,16 +2,26 @@
 Phase 8.3: Cross-Project Pattern Federation.
 
 This module enables sharing and synchronization of failure patterns
-across different projects using Graphiti as the backing store.
+across different projects.
+
+DEPRECATION NOTE (Phase 4):
+Federation is being deprecated in favor of Titan Memory's native project filtering.
+- Subscriptions are now no-ops (Titan handles automatically)
+- Search uses Titan when available, falls back to Graphiti
+- Use titan_recall --project global for cross-project patterns
 """
 
 import logging
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from .failure_store import FailurePattern
+
+if TYPE_CHECKING:
+    from .titan_client import TitanClient
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +58,16 @@ class ScoredPattern:
 
 class PatternFederation:
     """
-    Manages cross-project pattern sharing using Graphiti.
+    Manages cross-project pattern sharing.
+
+    DEPRECATION: This class is being deprecated in favor of Titan Memory's
+    native project filtering. When titan_client is provided, subscriptions
+    become no-ops and search uses Titan directly.
 
     Enables:
-    - Subscribing to patterns from other projects
+    - Subscribing to patterns from other projects (deprecated - use Titan)
     - Publishing local patterns for discovery
-    - Searching across subscribed projects
+    - Searching across subscribed projects (uses Titan when available)
     - Importing patterns with lineage tracking
     """
 
@@ -62,25 +76,35 @@ class PatternFederation:
         graphiti_client: Any,
         local_group_id: str,
         subscriptions: Optional[Set[str]] = None,
+        titan_client: Optional["TitanClient"] = None,
     ):
         """
         Initialize the federation system.
 
         Args:
-            graphiti_client: The Graphiti client instance
+            graphiti_client: The Graphiti client instance (legacy)
             local_group_id: Current project identifier (e.g., 'project_task_orchestrator')
-            subscriptions: Initial set of subscribed project IDs
+            subscriptions: Initial set of subscribed project IDs (deprecated with Titan)
+            titan_client: Optional Titan client (preferred for search)
         """
         self.client = graphiti_client
         self.local_group_id = local_group_id
         self.subscriptions: Set[str] = subscriptions or set()
         self._pattern_visibility: Dict[str, PatternVisibility] = {}
 
-        logger.info(f"PatternFederation initialized for {local_group_id}")
+        # Titan support (Phase 4)
+        self._titan_client = titan_client
+        self._use_titan = titan_client is not None
+
+        backend = "Titan" if self._use_titan else ("Graphiti" if graphiti_client else "local")
+        logger.info(f"PatternFederation initialized for {local_group_id} (backend={backend})")
 
     async def subscribe_to_project(self, target_group_id: str) -> Dict[str, Any]:
         """
         Subscribe to another project's shared patterns.
+
+        DEPRECATED: When using Titan, subscriptions are no-ops.
+        Titan's project filtering handles cross-project access automatically.
 
         Args:
             target_group_id: The group_id of the project to subscribe to
@@ -88,6 +112,21 @@ class PatternFederation:
         Returns:
             Result dictionary with status
         """
+        if self._use_titan:
+            warnings.warn(
+                "federation subscriptions are deprecated with Titan backend. "
+                "Use titan_recall without project filter to search across projects.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            logger.info(f"[DEPRECATED] Subscribe to {target_group_id} - Titan handles automatically")
+            return {
+                "success": True,
+                "subscribed_to": target_group_id,
+                "deprecated": True,
+                "message": "Subscriptions are no-ops with Titan. Cross-project search is automatic.",
+            }
+
         if target_group_id == self.local_group_id:
             return {"success": False, "error": "Cannot subscribe to self"}
 
@@ -155,6 +194,9 @@ class PatternFederation:
         """
         Search for patterns across all subscribed projects + local.
 
+        When Titan is available, uses titan_recall for cross-project search.
+        Falls back to Graphiti when Titan is not available.
+
         Args:
             query: Search query string
             limit: Maximum results to return
@@ -162,6 +204,11 @@ class PatternFederation:
         Returns:
             List of ScoredPattern results, sorted by relevance
         """
+        # Use Titan when available (Phase 4)
+        if self._use_titan and self._titan_client:
+            return await self._search_with_titan(query, limit)
+
+        # Legacy: Graphiti-based search
         results: List[ScoredPattern] = []
 
         # Search local project first
@@ -275,6 +322,90 @@ class PatternFederation:
             logger.warning(f"Search failed for group {group_id}: {e}")
 
         return scored_results
+
+    async def _search_with_titan(
+        self,
+        query: str,
+        limit: int = 10,
+    ) -> List[ScoredPattern]:
+        """
+        Search for patterns using Titan Memory (Phase 4).
+
+        Searches across all projects using Titan's native search without
+        project filtering, which automatically includes all accessible patterns.
+
+        Args:
+            query: Search query string
+            limit: Maximum results to return
+
+        Returns:
+            List of ScoredPattern results
+        """
+        import json
+
+        scored_results: List[ScoredPattern] = []
+
+        if not self._titan_client:
+            return scored_results
+
+        try:
+            # Search Titan without project filter = cross-project search
+            # Tags filter for failure patterns
+            memories = await self._titan_client.search_memories(
+                query=f"{query} failure pattern",
+                tags=["failure", "immune"],
+                limit=limit * 2,  # Get more to filter
+            )
+
+            for memory in memories:
+                try:
+                    content = memory.get("content", "")
+                    if not content:
+                        continue
+
+                    # Try to parse as JSON (failure pattern format)
+                    try:
+                        data = json.loads(content)
+                    except json.JSONDecodeError:
+                        # Not a JSON pattern, skip
+                        continue
+
+                    if data.get("type") != "failure_pattern":
+                        continue
+
+                    # Reconstruct pattern from Titan data
+                    pattern = FailurePattern(
+                        id=data.get("id", memory.get("id", "")),
+                        operation=data.get("operation", "unknown"),
+                        failure_type=data.get("failure_type", "unknown"),
+                        input_summary=data.get("input_summary", ""),
+                        output_summary=data.get("output_summary", ""),
+                        grader_scores=data.get("grader_scores", {}),
+                        occurrence_count=data.get("occurrence_count", 1),
+                        context=data.get("context", {}),
+                    )
+
+                    # Use Titan's score if available, otherwise calculate
+                    score = memory.get("score", 0.5)
+
+                    scored_results.append(ScoredPattern(
+                        pattern=pattern,
+                        relevance_score=score,
+                        source_project=data.get("context", {}).get("project", "titan"),
+                        match_reason=f"Matched via Titan search: {query}",
+                    ))
+
+                except Exception as e:
+                    logger.debug(f"Failed to parse Titan memory: {e}")
+                    continue
+
+        except Exception as e:
+            logger.warning(f"Titan search failed: {e}")
+
+        # Sort by relevance score (descending)
+        scored_results.sort(key=lambda x: x.relevance_score, reverse=True)
+
+        return scored_results[:limit]
 
     def _calculate_relevance(
         self,
