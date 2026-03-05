@@ -1,5 +1,6 @@
 """Email agent for task extraction and response drafting."""
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -147,6 +148,8 @@ class EmailAgent:
 
     def _build_analysis_prompt(self, email: EmailMessage) -> str:
         """Build prompt for LLM analysis."""
+        body = re.sub(r'[--]', '', email.body)
+        body = body[:4000]
         return f"""Analyze this email and extract actionable information.
 
 FROM: {email.sender}
@@ -155,7 +158,7 @@ DATE: {email.date}
 SUBJECT: {email.subject}
 
 BODY:
-{email.body[:2000]}
+{body[:2000]}
 
 Respond in JSON format:
 {{
@@ -282,13 +285,15 @@ I have received your message and will review it shortly.
 
 Best regards"""
 
+        body = re.sub(r'[--]', '', email.body)
+        body = body[:4000]
         prompt = f"""Draft a {tone} response to this email.
 
 FROM: {email.sender}
 SUBJECT: {email.subject}
 
 ORIGINAL MESSAGE:
-{email.body[:1500]}
+{body[:1500]}
 
 CONTEXT: {context}
 

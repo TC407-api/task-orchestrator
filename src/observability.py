@@ -327,9 +327,6 @@ def trace_operation(name: str, *, include_result: bool = False):
 
                 raise
 
-            finally:
-                # Always flush to ensure traces are sent
-                tracer.flush()
 
         return wrapper
 
@@ -356,4 +353,3 @@ def trace_context(name: str, **metadata):
         raise
     finally:
         span.end()
-        tracer.flush()

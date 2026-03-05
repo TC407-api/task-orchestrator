@@ -9,6 +9,8 @@ Includes 4-state governance model for cost protection:
 import asyncio
 import json
 import logging
+import re
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -291,6 +293,8 @@ class CostGovernor:
         if not script_path.exists():
             return
 
+        # Strip shell metacharacters from message before passing to subprocess
+        safe_message = shlex.quote(re.sub(r'[;&|`$<>\]', '', message))
         try:
             subprocess.Popen(
                 [
@@ -298,7 +302,7 @@ class CostGovernor:
                     "-NoProfile",
                     "-ExecutionPolicy", "Bypass",
                     "-File", str(script_path),
-                    "-Message", message,
+                    "-Message", safe_message,
                     "-Force",
                 ],
                 stdout=subprocess.DEVNULL,
@@ -349,6 +353,8 @@ class CostGovernor:
             logger.warning("Voice notify script not found")
             return
 
+        # Strip shell metacharacters from message before passing to subprocess
+        safe_message = shlex.quote(re.sub(r'[;&|`$<>\]', '', message))
         try:
             # Run PowerShell script in background (non-blocking)
             subprocess.Popen(
@@ -357,7 +363,7 @@ class CostGovernor:
                     "-NoProfile",
                     "-ExecutionPolicy", "Bypass",
                     "-File", str(script_path),
-                    "-Message", message,
+                    "-Message", safe_message,
                     "-Force",  # Skip rate limit for critical alerts
                 ],
                 stdout=subprocess.DEVNULL,
@@ -523,33 +529,47 @@ class CostTracker:
         governance_state_path = self.storage_path / "governance-state.json"
         self.governor = CostGovernor(config=governance_config, state_path=governance_state_path)
 
-        self._usage: list[UsageRecord] = []
+        self._usage: dict[str, list[UsageRecord]] = {}
         self._alerts: list[dict] = []
         self._load_state()
 
     def _load_state(self):
-        """Load persisted usage data."""
+        """Load persisted usage data (date-bucketed, prune > 30 days)."""
         if self.usage_file.exists():
             try:
                 data = json.loads(self.usage_file.read_text())
+                cutoff = datetime.now() - timedelta(days=30)
                 for record in data:
                     record["provider"] = Provider(record["provider"])
                     record["timestamp"] = datetime.fromisoformat(record["timestamp"])
-                    self._usage.append(UsageRecord(**record))
+                    if record["timestamp"] >= cutoff:
+                        usage_record = UsageRecord(**record)
+                        date_key = usage_record.timestamp.strftime("%Y-%m-%d")
+                        if date_key not in self._usage:
+                            self._usage[date_key] = []
+                        self._usage[date_key].append(usage_record)
             except (json.JSONDecodeError, KeyError):
-                self._usage = []
+                self._usage = {}
 
     def _save_state(self):
         """Persist usage data (non-blocking via thread pool)."""
-        data = [r.to_dict() for r in self._usage]
-        content = json.dumps(data, indent=2)
+        self._prune_old_usage()
+        all_records = [r.to_dict() for records in self._usage.values() for r in records]
+        serialized = json.dumps(all_records, indent=2)
         # PERF: Use thread pool to avoid blocking event loop
         try:
             loop = asyncio.get_running_loop()
-            loop.run_in_executor(None, self.usage_file.write_text, content)
+            loop.run_in_executor(None, self.usage_file.write_text, serialized)
         except RuntimeError:
             # No event loop running, write synchronously
-            self.usage_file.write_text(content)
+            self.usage_file.write_text(serialized)
+
+    def _prune_old_usage(self):
+        """Remove date buckets older than 30 days."""
+        cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        stale_keys = [k for k in self._usage if k < cutoff]
+        for k in stale_keys:
+            del self._usage[k]
 
     def calculate_cost(
         self,
@@ -585,7 +605,10 @@ class CostTracker:
             metadata=metadata or {},
         )
 
-        self._usage.append(record)
+        date_key = record.timestamp.strftime("%Y-%m-%d")
+        if date_key not in self._usage:
+            self._usage[date_key] = []
+        self._usage[date_key].append(record)
         self._save_state()
 
         # Check budgets
@@ -677,18 +700,17 @@ class CostTracker:
 
     def get_total_daily_spend(self) -> float:
         """Get total spend across all providers for today."""
-        today = datetime.now().date()
-        return sum(
-            r.cost_usd for r in self._usage
-            if r.timestamp.date() == today
-        )
+        today = datetime.now().strftime("%Y-%m-%d")
+        return sum(r.cost_usd for r in self._usage.get(today, []))
 
     def get_total_monthly_spend(self) -> float:
         """Get total spend across all providers for current month."""
-        now = datetime.now()
+        month_prefix = datetime.now().strftime("%Y-%m")
         return sum(
-            r.cost_usd for r in self._usage
-            if r.timestamp.year == now.year and r.timestamp.month == now.month
+            r.cost_usd
+            for key, records in self._usage.items()
+            if key.startswith(month_prefix)
+            for r in records
         )
 
     def get_governance_status(self) -> dict:
@@ -697,27 +719,29 @@ class CostTracker:
 
     def get_daily_spend(self, provider: Provider) -> float:
         """Get total spend for today."""
-        today = datetime.now().date()
+        today = datetime.now().strftime("%Y-%m-%d")
         return sum(
-            r.cost_usd for r in self._usage
-            if r.provider == provider and r.timestamp.date() == today
+            r.cost_usd for r in self._usage.get(today, [])
+            if r.provider == provider
         )
 
     def get_monthly_spend(self, provider: Provider) -> float:
         """Get total spend for current month."""
-        now = datetime.now()
+        month_prefix = datetime.now().strftime("%Y-%m")
         return sum(
-            r.cost_usd for r in self._usage
+            r.cost_usd
+            for key, records in self._usage.items()
+            if key.startswith(month_prefix)
+            for r in records
             if r.provider == provider
-            and r.timestamp.year == now.year
-            and r.timestamp.month == now.month
         )
 
     def get_total_spend(self, provider: Optional[Provider] = None) -> float:
         """Get total spend (optionally filtered by provider)."""
+        all_records = [r for records in self._usage.values() for r in records]
         if provider:
-            return sum(r.cost_usd for r in self._usage if r.provider == provider)
-        return sum(r.cost_usd for r in self._usage)
+            return sum(r.cost_usd for r in all_records if r.provider == provider)
+        return sum(r.cost_usd for r in all_records)
 
     def get_summary(self) -> dict:
         """Get comprehensive cost summary."""
@@ -770,11 +794,13 @@ class CostTracker:
 
     def get_usage_by_model(self, days: int = 30) -> dict:
         """Get usage breakdown by model."""
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff_key = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
         by_model = {}
-        for record in self._usage:
-            if record.timestamp >= cutoff:
+        for key, records in self._usage.items():
+            if key < cutoff_key:
+                continue
+            for record in records:
                 model = record.model or "unknown"
                 if model not in by_model:
                     by_model[model] = {
@@ -807,8 +833,10 @@ class CostTracker:
 
     def clear_old_records(self, days: int = 90):
         """Clear records older than specified days."""
-        cutoff = datetime.now() - timedelta(days=days)
-        self._usage = [r for r in self._usage if r.timestamp >= cutoff]
+        cutoff_key = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        stale_keys = [k for k in self._usage if k < cutoff_key]
+        for k in stale_keys:
+            del self._usage[k]
         self._save_state()
 
 

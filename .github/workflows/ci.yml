@@ -8,7 +8,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.11"
-  JWT_SECRET_KEY: "test-secret-key-for-ci"
+  JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY_TEST }}
 
 jobs:
   lint:
@@ -21,6 +21,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -49,14 +50,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -85,6 +79,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -110,6 +105,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -130,6 +126,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -138,11 +135,9 @@ jobs:
 
       - name: Run Bandit security linter
         run: bandit -r src/ -ll -ii -x tests/
-        continue-on-error: true
 
       - name: Check dependencies for vulnerabilities
         run: pip install -r requirements.txt && safety check
-        continue-on-error: true
 
   build:
     name: Build Check
@@ -155,6 +150,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |

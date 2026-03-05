@@ -213,6 +213,7 @@ class JWTKeyManager:
                 f,
                 indent=2,
             )
+        os.chmod(keys_file, 0o600)
 
     def generate_keypair(self) -> Tuple[str, str]:
         """

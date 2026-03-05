@@ -2392,7 +2392,6 @@ NEVER say "should work" - RUN IT and show the output.""")
         """Execute a workflow trigger."""
         workflow_name = args["workflow"]
         prompt = args["prompt"]
-        args.get("target_files", [])
 
         try:
             # Get workflow - convert "refactor" to "@Refactor" format

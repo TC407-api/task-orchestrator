@@ -86,6 +86,9 @@ class CircuitBreaker:
         self._trip_count = 0
         self._semantic_failures: dict[str, int] = {}  # Track semantic failures by type
         self._state_lock = Lock()
+        self._dirty: bool = False
+        self._last_save: float = 0.0
+        self._save_interval: float = 5.0
 
         # Ensure directory exists
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -117,7 +120,16 @@ class CircuitBreaker:
             pass
 
     def _save_state(self) -> None:
-        """Save state to persistent storage."""
+        """Mark state as dirty and flush to disk if debounce interval has elapsed."""
+        self._dirty = True
+        now = time.time()
+        if now - self._last_save >= self._save_interval:
+            self._flush_state()
+
+    def _flush_state(self) -> None:
+        """Write state to persistent storage immediately."""
+        if not self._dirty:
+            return
         try:
             with open(self.state_path, "w") as f:
                 json.dump({
@@ -131,6 +143,8 @@ class CircuitBreaker:
                     "semantic_failures": self._semantic_failures,
                     "updated_at": datetime.utcnow().isoformat(),
                 }, f, indent=2)
+            self._dirty = False
+            self._last_save = time.time()
         except Exception:
             pass
 

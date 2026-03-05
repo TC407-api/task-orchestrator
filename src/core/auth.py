@@ -1,5 +1,6 @@
 """Authentication utilities for Google APIs."""
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -66,6 +67,7 @@ def get_oauth_credentials(
                 "scopes": list(creds.scopes) if creds.scopes else scopes,
             }
             json.dump(token_data, token)
+        os.chmod(token_path, 0o600)
 
     return creds
 

@@ -11,7 +11,7 @@
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please report them via email to: [security@yourdomain.com]
+Instead, please report them via [GitHub Security Advisories](https://github.com/TC407-api/task-orchestrator/security/advisories/new).
 
 You should receive a response within 48 hours. If for some reason you do not, please follow up via email to ensure we received your original message.
 

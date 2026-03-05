@@ -29,6 +29,12 @@ from threading import Lock
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
+try:
+    import aiosqlite
+    _AIOSQLITE_AVAILABLE = True
+except ImportError:
+    _AIOSQLITE_AVAILABLE = False
+
 from .inbox import UniversalInbox, AgentEvent, EventType
 
 logger = logging.getLogger(__name__)
@@ -145,85 +151,70 @@ class BackgroundTaskScheduler:
         self.inbox = inbox
         self.db_path = db_path or ":memory:"
         self.max_workers = max_workers
-        self._db_lock = Lock()
         self._scheduled_tasks: dict[str, ScheduledTask] = {}
         self._task_results: dict[str, TaskResult] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._worker_semaphore = asyncio.Semaphore(max_workers)
-        # Keep persistent connection for in-memory databases
-        self._conn: Optional[sqlite3.Connection] = None
-        if self.db_path == ":memory:":
-            self._conn = sqlite3.connect(":memory:", check_same_thread=False)
-        self._init_db()
         self._scheduler_task: Optional[asyncio.Task] = None
+        self._db_initialized = False
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get database connection, using persistent connection for in-memory."""
-        if self._conn is not None:
-            return self._conn
-        return sqlite3.connect(self.db_path)
-
-    def _init_db(self) -> None:
-        """Initialize SQLite database schema."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        # Scheduled tasks table
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS scheduled_tasks (
-                task_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                schedule_type TEXT NOT NULL,
-                run_at TEXT,
-                interval_seconds INTEGER,
-                max_retries INTEGER,
-                timeout_seconds INTEGER,
-                created_at TEXT NOT NULL,
-                last_run TEXT,
-                next_run TEXT,
-                is_active BOOLEAN
+    async def _init_db(self) -> None:
+        """Initialize SQLite database schema using aiosqlite."""
+        if self._db_initialized:
+            return
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
+            # Scheduled tasks table
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    schedule_type TEXT NOT NULL,
+                    run_at TEXT,
+                    interval_seconds INTEGER,
+                    max_retries INTEGER,
+                    timeout_seconds INTEGER,
+                    created_at TEXT NOT NULL,
+                    last_run TEXT,
+                    next_run TEXT,
+                    is_active BOOLEAN
+                )
+                """
             )
-            """
-        )
-
-        # Task results table
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS task_results (
-                task_id TEXT PRIMARY KEY,
-                task_name TEXT NOT NULL,
-                status TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                duration_seconds REAL,
-                output TEXT,
-                error TEXT,
-                execution_count INTEGER,
-                next_scheduled TEXT
+            # Task results table
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS task_results (
+                    task_id TEXT PRIMARY KEY,
+                    task_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    duration_seconds REAL,
+                    output TEXT,
+                    error TEXT,
+                    execution_count INTEGER,
+                    next_scheduled TEXT
+                )
+                """
             )
-            """
-        )
-
-        # Task execution history
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS task_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                status TEXT NOT NULL,
-                output TEXT,
-                error TEXT,
-                duration_seconds REAL
+            # Task execution history
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS task_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    output TEXT,
+                    error TEXT,
+                    duration_seconds REAL
+                )
+                """
             )
-            """
-        )
-
-        conn.commit()
-        # Don't close persistent in-memory connection
-        if self._conn is None:
-            conn.close()
+            await db.commit()
+        self._db_initialized = True
 
     async def schedule_task(
         self,
@@ -241,6 +232,7 @@ class BackgroundTaskScheduler:
         Raises:
             ValueError: If task configuration is invalid
         """
+        await self._init_db()
         if task.schedule_type == TaskScheduleType.ONE_TIME and not task.run_at:
             raise ValueError("ONE_TIME tasks must have run_at specified")
 
@@ -257,7 +249,7 @@ class BackgroundTaskScheduler:
 
         # Store task
         self._scheduled_tasks[task.task_id] = task
-        self._store_task(task)
+        await self._store_task(task)
 
         # Publish scheduling event
         await self.inbox.publish(
@@ -277,39 +269,34 @@ class BackgroundTaskScheduler:
         logger.info(f"Scheduled task {task.task_id}: {task.name}")
         return task.task_id
 
-    def _store_task(self, task: ScheduledTask) -> None:
-        """Store task in database."""
-        with self._db_lock:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO scheduled_tasks
-                    (task_id, name, schedule_type, run_at, interval_seconds,
-                     max_retries, timeout_seconds, created_at, last_run, next_run,
-                     is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        task.task_id,
-                        task.name,
-                        task.schedule_type.value,
-                        task.run_at.isoformat() if task.run_at else None,
-                        task.interval_seconds,
-                        task.max_retries,
-                        task.timeout_seconds,
-                        task.created_at.isoformat(),
-                        task.last_run.isoformat() if task.last_run else None,
-                        task.next_run.isoformat() if task.next_run else None,
-                        task.is_active,
-                    ),
-                )
-                conn.commit()
-            finally:
-                if self._conn is None:
-                    conn.close()
+    async def _store_task(self, task: ScheduledTask) -> None:
+        """Store task in database using aiosqlite."""
+        await self._init_db()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO scheduled_tasks
+                (task_id, name, schedule_type, run_at, interval_seconds,
+                 max_retries, timeout_seconds, created_at, last_run, next_run,
+                 is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task.task_id,
+                    task.name,
+                    task.schedule_type.value,
+                    task.run_at.isoformat() if task.run_at else None,
+                    task.interval_seconds,
+                    task.max_retries,
+                    task.timeout_seconds,
+                    task.created_at.isoformat(),
+                    task.last_run.isoformat() if task.last_run else None,
+                    task.next_run.isoformat() if task.next_run else None,
+                    task.is_active,
+                ),
+            )
+            await db.commit()
 
     async def cancel_task(self, task_id: str) -> bool:
         """
@@ -326,7 +313,7 @@ class BackgroundTaskScheduler:
             return False
 
         task.is_active = False
-        self._store_task(task)
+        await self._store_task(task)
 
         # Cancel running task if active
         if task_id in self._running_tasks:
@@ -488,7 +475,7 @@ class BackgroundTaskScheduler:
 
                 # Store result
                 self._task_results[task.task_id] = result
-                self._store_result(result)
+                await self._store_result(result)
 
                 # Publish result event
                 await self.inbox.publish(
@@ -514,7 +501,7 @@ class BackgroundTaskScheduler:
                         seconds=task.interval_seconds or 300
                     )
                     task.last_run = result.completed_at
-                    self._store_task(task)
+                    await self._store_task(task)
 
                 logger.info(
                     f"Task {task.task_id} completed in {result.duration_seconds:.2f}s"
@@ -531,7 +518,7 @@ class BackgroundTaskScheduler:
                     error=str(e),
                 )
                 self._task_results[task.task_id] = result
-                self._store_result(result)
+                await self._store_result(result)
 
             finally:
                 # Clean up running task
@@ -621,57 +608,50 @@ class BackgroundTaskScheduler:
                 execution_count=attempt,
             )
 
-    def _store_result(self, result: TaskResult) -> None:
-        """Store task result in database."""
-        with self._db_lock:
-            conn = self._get_connection()
-            cursor = conn.cursor()
+    async def _store_result(self, result: TaskResult) -> None:
+        """Store task result in database using aiosqlite."""
+        await self._init_db()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO task_results
+                (task_id, task_name, status, started_at, completed_at,
+                 duration_seconds, output, error, execution_count, next_scheduled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result.task_id,
+                    result.task_name,
+                    result.status.value,
+                    result.started_at.isoformat(),
+                    result.completed_at.isoformat() if result.completed_at else None,
+                    result.duration_seconds,
+                    result.output,
+                    result.error,
+                    result.execution_count,
+                    result.next_scheduled.isoformat() if result.next_scheduled else None,
+                ),
+            )
+            # Also store in history
+            await db.execute(
+                """
+                INSERT INTO task_history
+                (task_id, timestamp, status, output, error, duration_seconds)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result.task_id,
+                    result.completed_at.isoformat() if result.completed_at else datetime.now().isoformat(),
+                    result.status.value,
+                    result.output,
+                    result.error,
+                    result.duration_seconds,
+                ),
+            )
+            await db.commit()
 
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO task_results
-                    (task_id, task_name, status, started_at, completed_at,
-                     duration_seconds, output, error, execution_count, next_scheduled)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        result.task_id,
-                        result.task_name,
-                        result.status.value,
-                        result.started_at.isoformat(),
-                        result.completed_at.isoformat() if result.completed_at else None,
-                        result.duration_seconds,
-                        result.output,
-                        result.error,
-                        result.execution_count,
-                        result.next_scheduled.isoformat() if result.next_scheduled else None,
-                    ),
-                )
-
-                # Also store in history
-                cursor.execute(
-                    """
-                    INSERT INTO task_history
-                    (task_id, timestamp, status, output, error, duration_seconds)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        result.task_id,
-                        result.completed_at.isoformat() if result.completed_at else datetime.now().isoformat(),
-                        result.status.value,
-                        result.output,
-                        result.error,
-                        result.duration_seconds,
-                    ),
-                )
-
-                conn.commit()
-            finally:
-                if self._conn is None:
-                    conn.close()
-
-    def get_task_history(
+    async def get_task_history(
         self,
         task_id: Optional[str] = None,
         limit: int = 100,
@@ -686,40 +666,34 @@ class BackgroundTaskScheduler:
         Returns:
             List of history records
         """
-        with self._db_lock:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-
-            try:
-                if task_id:
-                    cursor.execute(
-                        """
-                        SELECT task_id, timestamp, status, output, error,
-                               duration_seconds
-                        FROM task_history
-                        WHERE task_id = ?
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                        """,
-                        (task_id, limit),
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        SELECT task_id, timestamp, status, output, error,
-                               duration_seconds
-                        FROM task_history
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                        """,
-                        (limit,),
-                    )
-
-                columns = [col[0] for col in cursor.description]
-                return [dict(zip(columns, row)) for row in cursor.fetchall()]
-            finally:
-                if self._conn is None:
-                    conn.close()
+        await self._init_db()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if task_id:
+                cursor = await db.execute(
+                    """
+                    SELECT task_id, timestamp, status, output, error,
+                           duration_seconds
+                    FROM task_history
+                    WHERE task_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (task_id, limit),
+                )
+            else:
+                cursor = await db.execute(
+                    """
+                    SELECT task_id, timestamp, status, output, error,
+                           duration_seconds
+                    FROM task_history
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
     async def get_statistics(self) -> dict:
         """

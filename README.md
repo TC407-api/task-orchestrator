@@ -3,7 +3,7 @@
 [![CI](https://github.com/TC407-api/task-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/TC407-api/task-orchestrator/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-680%2B-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-607%2B-brightgreen.svg)](tests/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.io/)
 [![Website](https://img.shields.io/badge/website-live-blue.svg)](https://task-orchestrator-landing.vercel.app)
 
@@ -331,7 +331,7 @@ python -m pytest tests/test_phase8.py -v
 python -m pytest tests/ --cov=src --cov-report=html
 ```
 
-**Test Counts:** 680+ tests across all modules
+**Test Counts:** 607+ tests across all modules
 
 ## CI/CD
 

@@ -362,7 +362,7 @@ class ErrorCapture:
         Returns:
             Detected ErrorLanguage
         """
-        if "Traceback (most recent call last):" in output or "File" in output and "line" in output:
+        if "Traceback (most recent call last):" in output or ("File" in output and "line" in output):
             return ErrorLanguage.PYTHON
         elif "at " in output and ".js:" in output:
             return ErrorLanguage.NODEJS
