@@ -8,11 +8,18 @@ enabling pre-emptive guardrails before spawning agents.
 import logging
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from .failure_store import FailurePattern, FailurePatternStore, FAILURE_GROUP_ID
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=512)
+def _cached_similarity(text1: str, text2: str) -> float:
+    """Compute SequenceMatcher ratio with LRU caching to avoid redundant work."""
+    return SequenceMatcher(None, text1, text2).ratio()
 
 
 @dataclass
@@ -83,7 +90,7 @@ class PatternMatcher:
         """Calculate similarity between two texts using SequenceMatcher."""
         if not text1 or not text2:
             return 0.0
-        return SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+        return _cached_similarity(text1.lower(), text2.lower())
 
     def _extract_keywords(self, text: str) -> List[str]:
         """Extract important keywords from text."""

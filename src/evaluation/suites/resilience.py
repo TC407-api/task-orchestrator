@@ -72,7 +72,7 @@ class ResilienceEvalSuite:
                     duration_ms=(time.perf_counter() - start_time) * 1000,
                 )
             except Exception as e:
-                logger.error(f"Test {test_func.__name__} failed: {e}")
+                logger.error("Test {test_func.__name__} failed", exc_info=True)
                 result = ResilienceTestResult(
                     test_name=test_func.__name__,
                     passed=False,

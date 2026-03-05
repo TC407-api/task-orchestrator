@@ -15,6 +15,7 @@ Usage:
 import asyncio
 import functools
 import json
+import logging
 import random
 import time
 from dataclasses import dataclass
@@ -25,6 +26,8 @@ from threading import Lock
 from typing import Awaitable, Callable, Optional, TypeVar
 
 T = TypeVar('T')
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitState(str, Enum):
@@ -117,7 +120,7 @@ class CircuitBreaker:
                     self._trip_count = data.get("trip_count", 0)
                     self._semantic_failures = data.get("semantic_failures", {})
         except Exception:
-            pass
+            logger.warning("Failed to load circuit breaker state", exc_info=True)
 
     def _save_state(self) -> None:
         """Mark state as dirty and flush to disk if debounce interval has elapsed."""
@@ -146,7 +149,7 @@ class CircuitBreaker:
             self._dirty = False
             self._last_save = time.time()
         except Exception:
-            pass
+            logger.warning("Failed to flush circuit breaker state", exc_info=True)
 
     def _check_state_transition(self) -> None:
         """Check if state should transition based on timeout."""
@@ -491,6 +494,7 @@ def get_healing_status() -> dict:
             with open(config_path) as f:
                 status["config"] = json.load(f)
         except Exception:
+            logger.warning("Failed to load healing config", exc_info=True)
             status["config"] = {"error": "Failed to load config"}
 
     return status

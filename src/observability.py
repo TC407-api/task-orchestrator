@@ -195,7 +195,7 @@ class Tracer:
             try:
                 self._client.flush()
             except Exception:
-                pass
+                logger.warning("Failed to flush Langfuse traces", exc_info=True)
 
     def shutdown(self):
         """Shutdown the tracer."""
@@ -203,7 +203,7 @@ class Tracer:
             try:
                 self._client.shutdown()
             except Exception:
-                pass
+                logger.warning("Failed to shutdown Langfuse tracer", exc_info=True)
 
     # Backward compatibility aliases
     def trace(self, name: str, **kwargs):

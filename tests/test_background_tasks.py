@@ -3,13 +3,13 @@ import asyncio
 import pytest
 from datetime import datetime, timedelta
 
-from .background_tasks import (
+from src.agents.background_tasks import (
     BackgroundTaskScheduler,
     ScheduledTask,
     TaskScheduleType,
     TaskStatus,
 )
-from .inbox import UniversalInbox
+from src.agents.inbox import UniversalInbox
 
 
 @pytest.fixture

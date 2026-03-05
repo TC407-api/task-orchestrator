@@ -417,7 +417,7 @@ class PatternFederation:
             }
 
         except Exception as e:
-            logger.error(f"Failed to import pattern: {e}")
+            logger.error("Failed to import pattern", exc_info=True)
             return {"success": False, "error": str(e)}
 
     def get_subscriptions(self) -> List[str]:

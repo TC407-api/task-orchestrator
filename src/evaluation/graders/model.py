@@ -188,7 +188,7 @@ Respond ONLY with the JSON. No other text."""
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM JSON: {e}")
+            logger.error("Failed to parse LLM JSON", exc_info=True)
             return GraderResult(
                 name=self.name,
                 passed=False,

@@ -92,7 +92,7 @@ class EvaluationTracer:
             )
             return trace.id
         except Exception as e:
-            logger.error(f"Error creating trial trace: {e}")
+            logger.error("Error creating trial trace", exc_info=True)
             return None
 
     def log_grader_result(
@@ -151,7 +151,7 @@ class EvaluationTracer:
                 comment=result.reason[:500] if result.reason else None,
             )
         except Exception as e:
-            logger.error(f"Error logging grader result: {e}")
+            logger.error("Error logging grader result", exc_info=True)
 
     def log_trial_outcome(
         self,
@@ -194,7 +194,7 @@ class EvaluationTracer:
                     comment=f"Estimated cost: ${trial.cost_usd:.6f}",
                 )
         except Exception as e:
-            logger.error(f"Error logging trial outcome: {e}")
+            logger.error("Error logging trial outcome", exc_info=True)
 
     def flush(self) -> None:
         """Flush any pending events to Langfuse."""
@@ -202,7 +202,7 @@ class EvaluationTracer:
             try:
                 self.client.flush()
             except Exception as e:
-                logger.error(f"Error flushing Langfuse: {e}")
+                logger.error("Error flushing Langfuse", exc_info=True)
 
 
 # --- Cost Calculation Helpers ---

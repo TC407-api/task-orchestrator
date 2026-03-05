@@ -143,6 +143,7 @@ class CostGovernor:
 
         self._state_record = self._load_state()
         self._notification_callbacks: list[Callable] = []
+        self._http_client: Optional[object] = None  # Shared httpx.AsyncClient
 
     def _load_state(self) -> GovernanceStateRecord:
         """Load persisted governance state."""
@@ -284,7 +285,7 @@ class CostGovernor:
                 asyncio.run(self._notify_shutdown(reason))
             except Exception as e:
                 # If async fails completely, at least send voice notification synchronously
-                logger.error(f"Async notification failed: {e}")
+                logger.error("Async notification failed", exc_info=True)
                 self._send_voice_notification_sync(reason)
 
     def _send_voice_notification_sync(self, message: str):
@@ -309,7 +310,7 @@ class CostGovernor:
                 stderr=subprocess.DEVNULL,
             )
         except Exception as e:
-            logger.error(f"Sync voice notification failed: {e}")
+            logger.error("Sync voice notification failed", exc_info=True)
 
     async def _notify_shutdown(self, reason: str):
         """Send voice and webhook notifications for SHUTDOWN state."""
@@ -344,7 +345,7 @@ class CostGovernor:
                 else:
                     callback(message)
             except Exception as e:
-                logger.error(f"Notification callback failed: {e}")
+                logger.error("Notification callback failed", exc_info=True)
 
     async def _send_voice_notification(self, message: str):
         """Send voice notification via ElevenLabs/Windows TTS."""
@@ -371,7 +372,7 @@ class CostGovernor:
             )
             logger.info("Voice notification sent")
         except Exception as e:
-            logger.error(f"Voice notification failed: {e}")
+            logger.error("Voice notification failed", exc_info=True)
 
     async def _send_webhook_notification(self, message: str):
         """Send webhook notification."""
@@ -389,17 +390,18 @@ class CostGovernor:
 
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    self.config.webhook_url,
-                    json=payload,
-                    timeout=5.0,
-                )
+            if self._http_client is None:
+                self._http_client = httpx.AsyncClient()
+            await self._http_client.post(
+                self.config.webhook_url,
+                json=payload,
+                timeout=5.0,
+            )
             logger.info("Webhook notification sent")
         except ImportError:
             logger.warning("httpx not installed for webhook notifications")
         except Exception as e:
-            logger.error(f"Webhook notification failed: {e}")
+            logger.error("Webhook notification failed", exc_info=True)
 
     async def _send_slack_notification(self, message: str):
         """Send Slack notification for SHUTDOWN."""
@@ -426,17 +428,18 @@ class CostGovernor:
 
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    self.config.slack_webhook_url,
-                    json=payload,
-                    timeout=5.0,
-                )
+            if self._http_client is None:
+                self._http_client = httpx.AsyncClient()
+            await self._http_client.post(
+                self.config.slack_webhook_url,
+                json=payload,
+                timeout=5.0,
+            )
             logger.info("Slack notification sent")
         except ImportError:
             logger.warning("httpx not installed for Slack notifications")
         except Exception as e:
-            logger.error(f"Slack notification failed: {e}")
+            logger.error("Slack notification failed", exc_info=True)
 
     def add_notification_callback(self, callback: Callable):
         """Add a custom notification callback for SHUTDOWN events."""

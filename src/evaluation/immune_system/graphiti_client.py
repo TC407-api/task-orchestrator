@@ -110,7 +110,7 @@ class GraphitiClient:
                 "message": "Graphiti unavailable, stored locally",
             }
         except Exception as e:
-            logger.error(f"Graphiti add_memory error: {e}")
+            logger.error("Graphiti add_memory error", exc_info=True)
             return {"error": str(e)}
 
     async def add_episode(
@@ -165,7 +165,7 @@ class GraphitiClient:
             logger.warning(f"Graphiti connection error during search: {e}")
             return []
         except Exception as e:
-            logger.error(f"Graphiti search_nodes error: {e}")
+            logger.error("Graphiti search_nodes error", exc_info=True)
             return []
 
     async def search_memory_nodes(
@@ -219,7 +219,7 @@ class GraphitiClient:
             logger.warning(f"Graphiti connection error during search: {e}")
             return []
         except Exception as e:
-            logger.error(f"Graphiti search_facts error: {e}")
+            logger.error("Graphiti search_facts error", exc_info=True)
             return []
 
     async def search_memory_facts(

@@ -104,7 +104,7 @@ class AlertManager:
                     generated_alerts.append(alert)
                     self._stats["alerts_generated"] += 1
             except Exception as e:
-                logger.error(f"Error evaluating rule {rule.name}: {e}")
+                logger.error("Error evaluating rule {rule.name}", exc_info=True)
 
         if generated_alerts:
             await self._dispatch_alerts(generated_alerts)

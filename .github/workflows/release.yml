@@ -7,7 +7,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.11"
-  JWT_SECRET_KEY: "test-secret-key-for-ci"
+  JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY_TEST }}
 
 jobs:
   test:
@@ -20,6 +20,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |

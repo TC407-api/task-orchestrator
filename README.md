@@ -107,7 +107,7 @@ The evaluation system provides quality gates for agent outputs, catching semanti
 ```
 src/
 ├── mcp/
-│   ├── server.py         # MCP server with 41 tools
+│   ├── server.py         # MCP server with 42 tools
 │   ├── tool_router.py    # Dynamic tool loading
 │   └── context_tracker.py# Context window monitoring
 ├── agents/

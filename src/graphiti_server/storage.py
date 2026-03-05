@@ -17,6 +17,12 @@ MAX_QUERY_LENGTH = 1000
 MAX_RESULTS = 1000
 
 
+
+
+def _escape_like(query: str) -> str:
+    """Escape LIKE wildcards to prevent injection."""
+    return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 class LocalGraphitiStorage:
     """
     SQLite-based local storage for Graphiti episodes and entities.
@@ -309,19 +315,19 @@ class LocalGraphitiStorage:
                 sql = f"""
                     SELECT * FROM nodes
                     WHERE group_id IN ({placeholders})
-                    AND (name LIKE ? OR summary LIKE ?)
+                    AND (name LIKE ? ESCAPE '\' OR summary LIKE ? ESCAPE '\')
                     ORDER BY created_at DESC
                     LIMIT ?
                 """
-                params = group_ids + [f"%{query}%", f"%{query}%", max_nodes]
+                params = group_ids + [f"%{_escape_like(query)}%", f"%{_escape_like(query)}%", max_nodes]
             else:
                 sql = """
                     SELECT * FROM nodes
-                    WHERE name LIKE ? OR summary LIKE ?
+                    WHERE name LIKE ? ESCAPE '\' OR summary LIKE ? ESCAPE '\'
                     ORDER BY created_at DESC
                     LIMIT ?
                 """
-                params = [f"%{query}%", f"%{query}%", max_nodes]
+                params = [f"%{_escape_like(query)}%", f"%{_escape_like(query)}%", max_nodes]
 
             rows = conn.execute(sql, params).fetchall()
 
@@ -350,20 +356,20 @@ class LocalGraphitiStorage:
                     SELECT f.*, e.body as episode_body FROM facts f
                     LEFT JOIN episodes e ON f.episode_uuid = e.uuid
                     WHERE f.group_id IN ({placeholders})
-                    AND (f.subject LIKE ? OR f.predicate LIKE ? OR f.object LIKE ?)
+                    AND (f.subject LIKE ? ESCAPE '\' OR f.predicate LIKE ? ESCAPE '\' OR f.object LIKE ? ESCAPE '\')
                     ORDER BY f.created_at DESC
                     LIMIT ?
                 """
-                params = group_ids + [f"%{query}%", f"%{query}%", f"%{query}%", max_facts]
+                params = group_ids + [f"%{_escape_like(query)}%", f"%{_escape_like(query)}%", f"%{_escape_like(query)}%", max_facts]
             else:
                 sql = """
                     SELECT f.*, e.body as episode_body FROM facts f
                     LEFT JOIN episodes e ON f.episode_uuid = e.uuid
-                    WHERE f.subject LIKE ? OR f.predicate LIKE ? OR f.object LIKE ?
+                    WHERE f.subject LIKE ? ESCAPE '\' OR f.predicate LIKE ? ESCAPE '\' OR f.object LIKE ? ESCAPE '\'
                     ORDER BY f.created_at DESC
                     LIMIT ?
                 """
-                params = [f"%{query}%", f"%{query}%", f"%{query}%", max_facts]
+                params = [f"%{_escape_like(query)}%", f"%{_escape_like(query)}%", f"%{_escape_like(query)}%", max_facts]
 
             rows = conn.execute(sql, params).fetchall()
 

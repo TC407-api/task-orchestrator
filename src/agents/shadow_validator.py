@@ -815,7 +815,7 @@ class ShadowComparator:
             tree = ast.parse(source_code)
             return self._build_ast_node(tree, source_code)
         except SyntaxError as e:
-            logger.error(f"Failed to parse source code: {e}")
+            logger.error("Failed to parse source code", exc_info=True)
             return ASTNode(
                 type=ASTNodeType.MODULE,
                 name="<error>",
@@ -1044,7 +1044,7 @@ class ShadowComparator:
                     }
 
         except SyntaxError as e:
-            logger.error(f"Failed to parse source for signature extraction: {e}")
+            logger.error("Failed to parse source for signature extraction", exc_info=True)
 
         return None
 
@@ -1071,7 +1071,7 @@ class ShadowComparator:
                         call_chains.append(chain)
 
         except SyntaxError as e:
-            logger.error(f"Failed to parse source for call chain extraction: {e}")
+            logger.error("Failed to parse source for call chain extraction", exc_info=True)
 
         return call_chains
 
@@ -1100,7 +1100,7 @@ class ShadowComparator:
                             returns.append(return_str)
 
         except SyntaxError as e:
-            logger.error(f"Failed to parse source for return extraction: {e}")
+            logger.error("Failed to parse source for return extraction", exc_info=True)
 
         return returns
 

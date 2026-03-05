@@ -235,7 +235,7 @@ class ModelTrainer:
             return metrics
 
         except Exception as e:
-            logger.error(f"Evaluation failed: {e}")
+            logger.error("Evaluation failed", exc_info=True)
             return {"error": str(e)}
 
 

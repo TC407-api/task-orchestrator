@@ -174,7 +174,7 @@ class RegistryManager:
             logger.warning("namespaces.json not found, using defaults")
             self._init_defaults()
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in namespaces.json: {e}")
+            logger.error("Invalid JSON in namespaces.json", exc_info=True)
             self._init_defaults()
 
     async def get_project(self, project_id: str) -> Optional[PortfolioProject]:
@@ -209,7 +209,7 @@ class RegistryManager:
                 )
                 logger.info(f"Persisted {project.project_id} to Graphiti")
             except Exception as e:
-                logger.error(f"Failed to persist to Graphiti: {e}")
+                logger.error("Failed to persist to Graphiti", exc_info=True)
 
         return {
             "success": True,
@@ -269,7 +269,7 @@ class RegistryManager:
             return {"discovered": discovered_count, "total": len(self.projects)}
 
         except Exception as e:
-            logger.error(f"Auto-discovery failed: {e}")
+            logger.error("Auto-discovery failed", exc_info=True)
             return {"discovered": 0, "error": str(e)}
 
     async def update_sync_status(self, project_id: str) -> None:

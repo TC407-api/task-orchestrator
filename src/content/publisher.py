@@ -265,7 +265,7 @@ class ContentPublisher:
                 )
 
         except Exception as e:
-            logger.error(f"Failed to publish to {platform.value}: {e}")
+            logger.error("Failed to publish to {platform.value}", exc_info=True)
             return PublishResult(
                 platform=platform,
                 success=False,

@@ -287,7 +287,7 @@ class SyncEngine:
 
             return f"Synced {len(batch.changes)} items"
         except Exception as e:
-            logger.error(f"Failed to apply remote changes from {peer_id}: {e}")
+            logger.error("Failed to apply remote changes from {peer_id}", exc_info=True)
             raise e
 
     def sync_all(self) -> Dict[str, Any]:

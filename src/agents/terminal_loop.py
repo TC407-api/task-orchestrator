@@ -20,6 +20,7 @@ Usage:
 """
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +29,8 @@ from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from .inbox import AgentEvent, EventType, UniversalInbox
+
+logger = logging.getLogger(__name__)
 
 
 class ErrorLanguage(str, Enum):
@@ -953,6 +956,7 @@ class TerminalLoop:
             self._state = LoopState.CANCELLED
             raise
         except Exception:
+            logger.warning("Loop execution failed", exc_info=True)
             self._state = LoopState.FAILED
             raise
         finally:
@@ -1025,7 +1029,7 @@ class TerminalLoop:
                         else:
                             self.on_iteration_complete(iteration)
                     except Exception:
-                        pass  # Don't let callback errors break loop
+                        logger.warning("Iteration callback failed", exc_info=True)
 
             # Break if loop_condition returned False
             if not should_continue:
@@ -1166,4 +1170,4 @@ class TerminalLoop:
             with open(self.persistence_path, 'w') as f:
                 json.dump(state_data, f, indent=2)
         except Exception:
-            pass  # Silent fail on persistence errors
+            logger.warning("Failed to save loop state", exc_info=True)

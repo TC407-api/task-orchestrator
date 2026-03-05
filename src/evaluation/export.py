@@ -39,7 +39,7 @@ class TrainingDataExporter:
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            logger.error(f"Failed to create export directory {output_dir}: {e}")
+            logger.error("Failed to create export directory {output_dir}", exc_info=True)
             # Fallback to local directory if specified path fails
             self.output_dir = Path("./training-data")
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -105,7 +105,7 @@ class TrainingDataExporter:
             return filepath
 
         except Exception as e:
-            logger.error(f"Export failed: {e}")
+            logger.error("Export failed", exc_info=True)
             raise
 
     def _write_jsonl(self, filepath: Path, trials: List[Trial]) -> None:

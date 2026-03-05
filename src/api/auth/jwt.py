@@ -176,7 +176,7 @@ class JWTKeyManager:
     - JWKS endpoint support
     """
 
-    KEY_SIZE = 2048
+    KEY_SIZE = 4096
 
     def __init__(self, key_storage_path: Optional[str] = None):
         """

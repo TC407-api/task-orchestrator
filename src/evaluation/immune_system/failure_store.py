@@ -5,6 +5,7 @@ This module stores evaluation failures in Graphiti for later retrieval
 and pattern matching, enabling the system to learn from past mistakes.
 """
 
+import heapq
 import json
 import logging
 from dataclasses import dataclass, field
@@ -96,6 +97,9 @@ class FailurePatternStore:
         self._graphiti = graphiti_client
         self._local_cache: Dict[str, FailurePattern] = {}
         self._use_graphiti = graphiti_client is not None
+        # Min-heap of (created_at, id) for O(log n) recency tracking.
+        # Values are negated so the heap acts as a max-heap (most-recent first).
+        self._recency_heap: List[tuple] = []
 
     def _generate_failure_id(
         self,
@@ -193,6 +197,8 @@ class FailurePatternStore:
 
         # Store locally
         self._local_cache[failure_id] = pattern
+        # Push to recency heap (negate timestamp for max-heap behaviour)
+        heapq.heappush(self._recency_heap, (-pattern.created_at.timestamp(), failure_id))
 
         # Store in Graphiti if available
         if self._use_graphiti:
@@ -225,7 +231,7 @@ class FailurePatternStore:
                 source_description=f"Evaluation failure: {pattern.failure_type}",
             )
         except Exception as e:
-            logger.error(f"Failed to store to Graphiti: {e}")
+            logger.error("Failed to store to Graphiti", exc_info=True)
 
     async def get_failures_by_type(
         self,
@@ -253,13 +259,20 @@ class FailurePatternStore:
         self,
         limit: int = 10,
     ) -> List[FailurePattern]:
-        """Get most recent failure patterns."""
-        sorted_patterns = sorted(
-            self._local_cache.values(),
-            key=lambda p: p.created_at,
-            reverse=True,
-        )
-        return sorted_patterns[:limit]
+        """Get most recent failure patterns using the recency heap (O(k log n))."""
+        results: List[FailurePattern] = []
+        seen: set = set()
+        # Peek at the heap without destroying it by iterating a sorted copy.
+        for _, pid in heapq.nsmallest(limit * 2, self._recency_heap):
+            if pid in seen:
+                continue
+            seen.add(pid)
+            pattern = self._local_cache.get(pid)
+            if pattern is not None:
+                results.append(pattern)
+            if len(results) >= limit:
+                break
+        return results
 
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about stored failures."""
@@ -310,6 +323,7 @@ class FailurePatternStore:
             logger.debug(f"Updated existing pattern {pattern.id}")
         else:
             self._local_cache[pattern.id] = pattern
+            heapq.heappush(self._recency_heap, (-pattern.created_at.timestamp(), pattern.id))
             logger.debug(f"Stored pattern {pattern.id}")
 
 

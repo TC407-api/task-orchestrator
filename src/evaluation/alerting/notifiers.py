@@ -87,7 +87,7 @@ class WebhookNotifier(BaseNotifier):
             logger.warning("aiohttp not installed. Using httpx fallback.")
             return await self._notify_httpx(alert)
         except Exception as e:
-            logger.error(f"Failed to send webhook notification: {e}")
+            logger.error("Failed to send webhook notification", exc_info=True)
             return False
 
     async def _notify_httpx(self, alert: Alert) -> bool:
@@ -107,7 +107,7 @@ class WebhookNotifier(BaseNotifier):
             logger.error("Neither aiohttp nor httpx is installed for webhook notifications.")
             return False
         except Exception as e:
-            logger.error(f"Failed to send webhook via httpx: {e}")
+            logger.error("Failed to send webhook via httpx", exc_info=True)
             return False
 
 
@@ -177,7 +177,7 @@ class SlackNotifier(BaseNotifier):
                 logger.error("Neither aiohttp nor httpx is installed for Slack notifications.")
                 return False
         except Exception as e:
-            logger.error(f"Slack notification failed: {e}")
+            logger.error("Slack notification failed", exc_info=True)
             return False
 
 

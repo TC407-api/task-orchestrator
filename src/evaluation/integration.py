@@ -41,7 +41,7 @@ async def score_trial(trial: Trial) -> None:
                     comment=result.reason[:1000] if result.reason else None,
                 )
             except Exception as e:
-                logger.error(f"Failed to push score for grader '{result.name}': {e}")
+                logger.error("Failed to push score for grader '{result.name}'", exc_info=True)
 
         # Overall pass/fail score
         passed_count = len([r for r in trial.grader_results if r.passed])
@@ -56,7 +56,7 @@ async def score_trial(trial: Trial) -> None:
         logger.debug(f"Scored trial {trial.id} in Langfuse.")
 
     except Exception as e:
-        logger.error(f"Error in score_trial for trial {trial.id}: {e}", exc_info=True)
+        logger.error("Error in score_trial for trial %s", trial.id, exc_info=True)
 
 
 async def score_grader_result(
@@ -81,7 +81,7 @@ async def score_grader_result(
             comment=result.reason,
         )
     except Exception as e:
-        logger.error(f"Failed to push single grader score: {e}")
+        logger.error("Failed to push single grader score", exc_info=True)
 
 
 def create_eval_span(trial: Trial) -> Any:
@@ -115,5 +115,5 @@ def create_eval_span(trial: Trial) -> Any:
             metadata=metadata,
         )
     except Exception as e:
-        logger.error(f"Failed to create eval span: {e}")
+        logger.error("Failed to create eval span", exc_info=True)
         return nullcontext()

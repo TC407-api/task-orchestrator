@@ -80,7 +80,7 @@ class SyncMessage:
                 payload=parsed.get("payload", {})
             )
         except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Failed to parse sync message: {e}")
+            logger.error("Failed to parse sync message", exc_info=True)
             raise
 
 
@@ -229,7 +229,7 @@ class PatternSyncClient:
                 else:
                     self.callback(message)
             except Exception as e:
-                logger.error(f"Callback failed: {e}")
+                logger.error("Callback failed", exc_info=True)
 
     async def _heartbeat_loop(self):
         """Sends periodic heartbeats to keep the connection alive."""

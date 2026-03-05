@@ -126,7 +126,7 @@ async def add_episode(request: EpisodeRequest) -> Dict[str, Any]:
         )
         return result
     except Exception as e:
-        logger.error(f"Failed to add episode: {e}")
+        logger.error("Failed to add episode", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -157,7 +157,7 @@ async def search_nodes(
             max_nodes=max_nodes,
         )
     except Exception as e:
-        logger.error(f"Failed to search nodes: {e}")
+        logger.error("Failed to search nodes", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -188,7 +188,7 @@ async def search_facts(
             max_facts=max_facts,
         )
     except Exception as e:
-        logger.error(f"Failed to search facts: {e}")
+        logger.error("Failed to search facts", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -212,7 +212,7 @@ async def trigger_sync(request: SyncRequest = SyncRequest()) -> Dict[str, Any]:
         result = await sync_service.sync_to_mcp(max_episodes=request.max_episodes)
         return result
     except Exception as e:
-        logger.error(f"Sync failed: {e}")
+        logger.error("Sync failed", exc_info=True)
         return {"synced": 0, "failed": 0, "errors": [str(e)]}
 
 
@@ -224,7 +224,7 @@ async def get_unsynced_episodes(
     return storage.get_unsynced_episodes(limit=limit)
 
 
-def start_server(host: str = "0.0.0.0", port: int = 8000):
+def start_server(host: str = "127.0.0.1", port: int = 8000):
     """Start the server using uvicorn."""
     import uvicorn
     uvicorn.run(app, host=host, port=port)

@@ -150,10 +150,10 @@ class FailurePredictor:
             }
 
         except ImportError as e:
-            logger.error(f"scikit-learn not installed: {e}")
+            logger.error("scikit-learn not installed", exc_info=True)
             return {"success": False, "error": "scikit-learn not installed"}
         except Exception as e:
-            logger.error(f"Training failed: {e}")
+            logger.error("Training failed", exc_info=True)
             return {"success": False, "error": str(e)}
 
     def _save_model(self) -> None:
@@ -223,7 +223,7 @@ class FailurePredictor:
             )
 
         except Exception as e:
-            logger.error(f"Prediction error: {e}")
+            logger.error("Prediction error", exc_info=True)
             return PredictionResult(
                 risk_score=0.5,
                 is_high_risk=False,
@@ -277,7 +277,7 @@ class FailurePredictor:
             }
 
         except Exception as e:
-            logger.error(f"Failed to get feature importance: {e}")
+            logger.error("Failed to get feature importance", exc_info=True)
             return {}
 
 

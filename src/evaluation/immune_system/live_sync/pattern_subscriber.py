@@ -189,7 +189,7 @@ class PatternSubscriber:
 
             except Exception as e:
                 self._status = ConnectionStatus.DISCONNECTED
-                logger.error(f"Connection error: {e}. Retrying in {retry_delay}s...")
+                logger.error("Connection error: . Retrying in {retry_delay}s...", exc_info=True)
 
                 if self._stop_event.is_set():
                     break
@@ -259,7 +259,7 @@ class PatternSubscriber:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in event processor: {e}")
+                logger.error("Error in event processor", exc_info=True)
 
     async def _safe_callback(
         self,

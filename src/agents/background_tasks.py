@@ -157,13 +157,21 @@ class BackgroundTaskScheduler:
         self._worker_semaphore = asyncio.Semaphore(max_workers)
         self._scheduler_task: Optional[asyncio.Task] = None
         self._db_initialized = False
+        self._conn: Optional[aiosqlite.Connection] = None
+
+    async def _get_db(self) -> aiosqlite.Connection:
+        """Get or create a persistent database connection."""
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(self.db_path)
+            await self._conn.execute("PRAGMA journal_mode=WAL")
+        return self._conn
 
     async def _init_db(self) -> None:
         """Initialize SQLite database schema using aiosqlite."""
         if self._db_initialized:
             return
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
+        db = await self._get_db()
+        if True:  # preserve indentation
             # Scheduled tasks table
             await db.execute(
                 """
@@ -214,7 +222,7 @@ class BackgroundTaskScheduler:
                 """
             )
             await db.commit()
-        self._db_initialized = True
+            self._db_initialized = True
 
     async def schedule_task(
         self,
@@ -272,31 +280,30 @@ class BackgroundTaskScheduler:
     async def _store_task(self, task: ScheduledTask) -> None:
         """Store task in database using aiosqlite."""
         await self._init_db()
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute(
-                """
-                INSERT OR REPLACE INTO scheduled_tasks
-                (task_id, name, schedule_type, run_at, interval_seconds,
-                 max_retries, timeout_seconds, created_at, last_run, next_run,
-                 is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    task.task_id,
-                    task.name,
-                    task.schedule_type.value,
-                    task.run_at.isoformat() if task.run_at else None,
-                    task.interval_seconds,
-                    task.max_retries,
-                    task.timeout_seconds,
-                    task.created_at.isoformat(),
-                    task.last_run.isoformat() if task.last_run else None,
-                    task.next_run.isoformat() if task.next_run else None,
-                    task.is_active,
-                ),
-            )
-            await db.commit()
+        db = await self._get_db()
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO scheduled_tasks
+            (task_id, name, schedule_type, run_at, interval_seconds,
+             max_retries, timeout_seconds, created_at, last_run, next_run,
+             is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task.task_id,
+                task.name,
+                task.schedule_type.value,
+                task.run_at.isoformat() if task.run_at else None,
+                task.interval_seconds,
+                task.max_retries,
+                task.timeout_seconds,
+                task.created_at.isoformat(),
+                task.last_run.isoformat() if task.last_run else None,
+                task.next_run.isoformat() if task.next_run else None,
+                task.is_active,
+            ),
+        )
+        await db.commit()
 
     async def cancel_task(self, task_id: str) -> bool:
         """
@@ -460,7 +467,7 @@ class BackgroundTaskScheduler:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Error in scheduler loop: {e}")
+            logger.error("Error in scheduler loop", exc_info=True)
 
     async def _execute_task(self, task: ScheduledTask) -> None:
         """
@@ -508,7 +515,7 @@ class BackgroundTaskScheduler:
                 )
 
             except Exception as e:
-                logger.error(f"Error executing task {task.task_id}: {e}")
+                logger.error("Error executing task {task.task_id}", exc_info=True)
                 result = TaskResult(
                     task_id=task.task_id,
                     task_name=task.name,
@@ -589,12 +596,15 @@ class BackgroundTaskScheduler:
                 execution_count=attempt,
             )
 
-        except Exception as e:
-            error_msg = str(e)
-            if attempt < task.max_retries and "retryable" in error_msg.lower():
-                logger.warning(f"Task error: {error_msg}, retrying... (attempt {attempt + 1})")
+        except sqlite3.OperationalError:
+            # Retry on database lock errors (e.g. "database is locked")
+            if attempt < task.max_retries:
+                logger.warning("Database lock error, retrying (attempt %d)", attempt + 1, exc_info=True)
                 await asyncio.sleep(2 ** attempt)
                 return await self._run_task_with_retries(task, attempt + 1)
+            error_msg = "Database lock error"
+        except Exception as e:
+            error_msg = str(e)
 
             completed_at = datetime.now()
             return TaskResult(
@@ -611,45 +621,44 @@ class BackgroundTaskScheduler:
     async def _store_result(self, result: TaskResult) -> None:
         """Store task result in database using aiosqlite."""
         await self._init_db()
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute(
-                """
-                INSERT OR REPLACE INTO task_results
-                (task_id, task_name, status, started_at, completed_at,
-                 duration_seconds, output, error, execution_count, next_scheduled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    result.task_id,
-                    result.task_name,
-                    result.status.value,
-                    result.started_at.isoformat(),
-                    result.completed_at.isoformat() if result.completed_at else None,
-                    result.duration_seconds,
-                    result.output,
-                    result.error,
-                    result.execution_count,
-                    result.next_scheduled.isoformat() if result.next_scheduled else None,
-                ),
-            )
-            # Also store in history
-            await db.execute(
-                """
-                INSERT INTO task_history
-                (task_id, timestamp, status, output, error, duration_seconds)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    result.task_id,
-                    result.completed_at.isoformat() if result.completed_at else datetime.now().isoformat(),
-                    result.status.value,
-                    result.output,
-                    result.error,
-                    result.duration_seconds,
-                ),
-            )
-            await db.commit()
+        db = await self._get_db()
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO task_results
+            (task_id, task_name, status, started_at, completed_at,
+             duration_seconds, output, error, execution_count, next_scheduled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result.task_id,
+                result.task_name,
+                result.status.value,
+                result.started_at.isoformat(),
+                result.completed_at.isoformat() if result.completed_at else None,
+                result.duration_seconds,
+                result.output,
+                result.error,
+                result.execution_count,
+                result.next_scheduled.isoformat() if result.next_scheduled else None,
+            ),
+        )
+        # Also store in history
+        await db.execute(
+            """
+            INSERT INTO task_history
+            (task_id, timestamp, status, output, error, duration_seconds)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result.task_id,
+                result.completed_at.isoformat() if result.completed_at else datetime.now().isoformat(),
+                result.status.value,
+                result.output,
+                result.error,
+                result.duration_seconds,
+            ),
+        )
+        await db.commit()
 
     async def get_task_history(
         self,
@@ -667,33 +676,33 @@ class BackgroundTaskScheduler:
             List of history records
         """
         await self._init_db()
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            if task_id:
-                cursor = await db.execute(
+        db = await self._get_db()
+        db.row_factory = aiosqlite.Row
+        if task_id:
+            cursor = await db.execute(
                     """
-                    SELECT task_id, timestamp, status, output, error,
-                           duration_seconds
-                    FROM task_history
-                    WHERE task_id = ?
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (task_id, limit),
-                )
-            else:
-                cursor = await db.execute(
-                    """
-                    SELECT task_id, timestamp, status, output, error,
-                           duration_seconds
-                    FROM task_history
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                )
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+                SELECT task_id, timestamp, status, output, error,
+                       duration_seconds
+                FROM task_history
+                WHERE task_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (task_id, limit),
+            )
+        else:
+            cursor = await db.execute(
+                """
+                SELECT task_id, timestamp, status, output, error,
+                       duration_seconds
+                FROM task_history
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
 
     async def get_statistics(self) -> dict:
         """
@@ -1214,7 +1223,7 @@ class BackgroundTaskManager:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Worker {worker_id} error: {e}")
+            logger.error("Worker {worker_id} error", exc_info=True)
 
         logger.debug(f"Worker {worker_id} stopped")
 

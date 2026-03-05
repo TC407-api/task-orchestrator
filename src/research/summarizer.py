@@ -100,7 +100,7 @@ class ResearchSummarizer:
             return summary
 
         except Exception as e:
-            logger.error(f"Summarization error for '{topic}': {e}")
+            logger.error("Summarization error for '{topic}'", exc_info=True)
             return self._fallback_summary(topic, results)
 
     def _format_results(
@@ -192,7 +192,7 @@ Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}
             logger.warning("Graphiti client not available - storing locally only")
             return "local_only"
         except Exception as e:
-            logger.error(f"Graphiti storage error: {e}")
+            logger.error("Graphiti storage error", exc_info=True)
             return f"error: {e}"
 
     async def search_past_research(
@@ -227,5 +227,5 @@ Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}
             logger.warning("Graphiti client not available")
             return []
         except Exception as e:
-            logger.error(f"Graphiti search error: {e}")
+            logger.error("Graphiti search error", exc_info=True)
             return []

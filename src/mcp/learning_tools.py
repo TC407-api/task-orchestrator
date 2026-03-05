@@ -207,7 +207,7 @@ class LearningToolHandler:
             if self._portfolio_path.exists():
                 return json.loads(self._portfolio_path.read_text())
         except Exception as e:
-            logger.error(f"Failed to load portfolio: {e}")
+            logger.error("Failed to load portfolio", exc_info=True)
         return {}
 
     def _get_projects(self, portfolio: dict, filter_names: list) -> list:
@@ -284,7 +284,7 @@ class LearningToolHandler:
 
             except Exception as e:
                 errors.append(f"{name}: {str(e)}")
-                logger.error(f"Error storing learning {name}: {e}")
+                logger.error("Error storing learning {name}", exc_info=True)
 
         return {
             "stored": stored_count,
@@ -344,7 +344,7 @@ class LearningToolHandler:
             logger.info(f"Found {len(results)} results for topic '{topic}'")
 
         except Exception as e:
-            logger.error(f"Graphiti search error for '{topic}': {e}")
+            logger.error("Graphiti search error for '{topic}'", exc_info=True)
 
         return results
 
@@ -365,4 +365,4 @@ class LearningToolHandler:
 
             self._portfolio_path.write_text(json.dumps(portfolio, indent=2))
         except Exception as e:
-            logger.error(f"Failed to update portfolio: {e}")
+            logger.error("Failed to update portfolio", exc_info=True)

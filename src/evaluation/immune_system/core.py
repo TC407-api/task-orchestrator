@@ -7,6 +7,7 @@ failure storage, pattern matching, and prompt guardrails.
 Includes Graphiti persistence for cross-session memory (Phase 7).
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -321,7 +322,7 @@ class ImmuneSystem:
                 f"Graphiti sync complete: loaded={results['loaded']}, persisted={results['persisted']}"
             )
         except Exception as e:
-            logger.error(f"Failed during Graphiti sync: {str(e)}", exc_info=True)
+            logger.error("Failed during Graphiti sync", exc_info=True)
             results["errors"].append(str(e))
 
         return results
@@ -367,7 +368,7 @@ class ImmuneSystem:
             return {"loaded": loaded_count}
 
         except Exception as e:
-            logger.error(f"Error loading from Graphiti: {e}")
+            logger.error("Error loading from Graphiti", exc_info=True)
             return {"loaded": 0, "error": str(e)}
 
     async def persist_to_graphiti(self) -> Dict[str, Any]:
@@ -400,11 +401,9 @@ class ImmuneSystem:
         logger.info(f"Persisting {len(unsynced_patterns)} new patterns to Graphiti.")
         persisted_count = 0
 
-        for pattern in unsynced_patterns:
+        async def _persist_one(pattern: FailurePattern) -> bool:
             try:
                 payload = self._serialize_pattern_for_graphiti(pattern)
-
-                # Add as memory to Graphiti
                 await self._graphiti_client.add_memory(
                     name=f"failure_pattern_{pattern.id}",
                     episode_body=json.dumps(payload),
@@ -412,12 +411,16 @@ class ImmuneSystem:
                     source="json",
                     source_description="immune_failure_pattern",
                 )
+                return True
+            except Exception:
+                logger.error("Failed to persist pattern %s to Graphiti", pattern.id, exc_info=True)
+                return False
 
+        results = await asyncio.gather(*(_persist_one(p) for p in unsynced_patterns))
+        for pattern, ok in zip(unsynced_patterns, results):
+            if ok:
                 self._synced_pattern_ids.add(pattern.id)
                 persisted_count += 1
-
-            except Exception as e:
-                logger.error(f"Failed to persist pattern {pattern.id} to Graphiti: {e}")
 
         return {"persisted": persisted_count}
 

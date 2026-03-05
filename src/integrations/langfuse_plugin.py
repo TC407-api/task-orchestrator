@@ -118,7 +118,7 @@ class LangfusePlugin:
                 "dataset_name": dataset_name,
             }
         except Exception as e:
-            logger.error(f"Error exporting immune patterns: {e}")
+            logger.error("Error exporting immune patterns", exc_info=True)
             return {"error": str(e), "items_exported": 0}
 
     async def push_dashboard_metrics(
@@ -161,7 +161,7 @@ class LangfusePlugin:
             self.client.flush()
             return True
         except Exception as e:
-            logger.error(f"Error pushing dashboard metrics: {e}")
+            logger.error("Error pushing dashboard metrics", exc_info=True)
             return False
 
     async def create_evaluation_dataset(
@@ -218,7 +218,7 @@ class LangfusePlugin:
             self.client.flush()
             return dataset.id
         except Exception as e:
-            logger.error(f"Error creating evaluation dataset: {e}")
+            logger.error("Error creating evaluation dataset", exc_info=True)
             return ""
 
     async def aggregate_scores(
@@ -260,7 +260,7 @@ class LangfusePlugin:
                 if score_counts.get(name, 0) > 0
             }
         except Exception as e:
-            logger.error(f"Error aggregating scores: {e}")
+            logger.error("Error aggregating scores", exc_info=True)
             return {}
 
     def flush(self) -> None:
@@ -269,7 +269,7 @@ class LangfusePlugin:
             try:
                 self.client.flush()
             except Exception as e:
-                logger.error(f"Error flushing Langfuse: {e}")
+                logger.error("Error flushing Langfuse", exc_info=True)
 
 
 def create_langfuse_plugin(
@@ -290,7 +290,7 @@ def create_langfuse_plugin(
             return plugin
         return plugin  # Return even if not enabled for testing
     except Exception as e:
-        logger.error(f"Failed to create Langfuse plugin: {e}")
+        logger.error("Failed to create Langfuse plugin", exc_info=True)
         return None
 
 
@@ -383,7 +383,7 @@ async def handle_langfuse_export(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"error": f"Invalid export type: {export_type}", "success": False}
 
     except Exception as e:
-        logger.error(f"Error in langfuse_export: {e}")
+        logger.error("Error in langfuse_export", exc_info=True)
         return {"error": str(e), "success": False}
 
 

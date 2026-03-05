@@ -87,14 +87,14 @@ class AgentIdentityManager:
     Manages the lifecycle of agent identities with cryptographic binding.
 
     Features:
-    - RSA keypair generation (2048-bit)
+    - RSA keypair generation (4096-bit)
     - Credential rotation with configurable expiry
     - Revocation support
     - Signature verification
     """
 
     DEFAULT_EXPIRY_DAYS = 90
-    KEY_SIZE = 2048
+    KEY_SIZE = 4096
 
     def __init__(self, storage_path: Optional[Path] = None):
         """

@@ -83,7 +83,7 @@ class TopicRegistry:
             return registry
 
         except Exception as e:
-            logger.error(f"Error loading topic registry: {e}")
+            logger.error("Error loading topic registry", exc_info=True)
             registry = cls()
             registry._registry_path = file_path
             return registry
@@ -395,7 +395,7 @@ class ResearchScheduler:
                         })
 
                 except Exception as e:
-                    logger.error(f"Perplexity error for '{topic}': {e}")
+                    logger.error("Perplexity error for '{topic}'", exc_info=True)
                     results.append({
                         "topic": topic,
                         "status": "error",
@@ -444,7 +444,7 @@ class ResearchScheduler:
                         })
 
                 except Exception as e:
-                    logger.error(f"Firecrawl error for '{topic}': {e}")
+                    logger.error("Firecrawl error for '{topic}'", exc_info=True)
                     results.append({
                         "topic": topic,
                         "status": "error",

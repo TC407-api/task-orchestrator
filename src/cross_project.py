@@ -26,6 +26,7 @@ Usage:
     )
 """
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,8 @@ except ImportError:
     PatternStore = None
     PatternType = None
     Pattern = None
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -95,7 +98,7 @@ class CrossProjectLearning:
             try:
                 self._pattern_store = PatternStore()
             except Exception:
-                pass
+                logger.warning("Failed to initialize local pattern store", exc_info=True)
 
     def _load_namespaces(self) -> Dict[str, Any]:
         """Load project namespace configuration."""
@@ -105,7 +108,7 @@ class CrossProjectLearning:
                 with open(namespace_path) as f:
                     return json.load(f)
             except Exception:
-                pass
+                logger.warning("Failed to load namespace config", exc_info=True)
         return {"namespaces": [], "global_group_id": "global"}
 
     def _get_related_group_ids(self) -> List[str]:
@@ -175,8 +178,7 @@ class CrossProjectLearning:
                         metadata=p.metadata,
                     ))
             except Exception:
-                # Log error but continue
-                pass
+                logger.warning("Failed to query local pattern store", exc_info=True)
 
         # Note: Graphiti queries would be done through MCP calls
         # The caller can use mcp__graphiti__search_memory_facts directly
@@ -206,6 +208,7 @@ class CrossProjectLearning:
             else:
                 return self._pattern_store.record_failure(pattern_id)
         except Exception:
+            logger.warning("Failed to record pattern usage", exc_info=True)
             return False
 
     async def extract_pattern(
@@ -276,6 +279,7 @@ class CrossProjectLearning:
                 metadata=pattern.metadata,
             )
         except Exception:
+            logger.warning("Failed to extract and store pattern", exc_info=True)
             return None
 
     def get_stats(self) -> Dict[str, Any]:
@@ -291,7 +295,7 @@ class CrossProjectLearning:
             try:
                 stats["local_store"] = self._pattern_store.get_stats()
             except Exception:
-                pass
+                logger.warning("Failed to get pattern store stats", exc_info=True)
 
         return stats
 

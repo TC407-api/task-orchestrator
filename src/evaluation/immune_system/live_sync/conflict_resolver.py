@@ -195,7 +195,7 @@ class ConflictResolver:
             try:
                 self._callback(record)
             except Exception as e:
-                logger.error(f"Error in conflict callback: {e}")
+                logger.error("Error in conflict callback", exc_info=True)
 
         return resolved_pattern, True
 

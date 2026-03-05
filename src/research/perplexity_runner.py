@@ -130,7 +130,7 @@ Be factual and cite your sources."""
             logger.error(f"Perplexity timeout for '{topic}'")
             return {"topic": topic, "answer": "", "citations": [], "error": "Timeout"}
         except Exception as e:
-            logger.error(f"Perplexity error for '{topic}': {e}")
+            logger.error("Perplexity error for '{topic}'", exc_info=True)
             return {"topic": topic, "answer": "", "citations": [], "error": str(e)}
 
     def _parse_response(self, topic: str, data: dict) -> dict:

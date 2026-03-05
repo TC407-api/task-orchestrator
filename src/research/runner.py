@@ -128,7 +128,7 @@ class ResearchRunner:
             logger.error(f"Search timeout for '{topic}'")
             return []
         except Exception as e:
-            logger.error(f"Search error for '{topic}': {e}")
+            logger.error("Search error for '{topic}'", exc_info=True)
             return []
 
     def _parse_search_results(self, data: dict) -> list[dict]:
@@ -204,7 +204,7 @@ class ResearchRunner:
             logger.error(f"Fetch timeout for {url}")
             return {"url": url, "content": "", "error": "Timeout"}
         except Exception as e:
-            logger.error(f"Fetch error for {url}: {e}")
+            logger.error("Fetch error for {url}", exc_info=True)
             return {"url": url, "content": "", "error": str(e)}
 
     async def fetch_multiple_urls(self, urls: list[str]) -> list[dict]:
