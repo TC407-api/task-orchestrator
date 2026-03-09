@@ -19,35 +19,46 @@ import os
 from functools import wraps
 
 # Check if langfuse is available
+import logging as _logging
+
+_tracing_logger = _logging.getLogger(__name__)
+
+def _noop_observe(name=None, **kwargs):
+    """No-op decorator when langfuse is not available."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 try:
     from langfuse import Langfuse
     from langfuse.decorators import observe as langfuse_observe
 
-    # Initialize Langfuse client
-    langfuse = Langfuse(
-        public_key=os.getenv("LANGFUSE_PUBLIC_KEY", "pk-lf-e4acdb77-1e22-4a75-ac49-f44dc85c6ba7"),
-        secret_key=os.getenv("LANGFUSE_SECRET_KEY", "sk-lf-ecb05847-f7c6-4ed5-9298-72ab4252c096"),
-        host=os.getenv("LANGFUSE_HOST", "http://localhost:3000")
-    )
+    _public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    _secret_key = os.getenv("LANGFUSE_SECRET_KEY")
 
-    # Re-export observe decorator
-    observe = langfuse_observe
-
-    TRACING_ENABLED = True
+    if _public_key and _secret_key:
+        langfuse = Langfuse(
+            public_key=_public_key,
+            secret_key=_secret_key,
+            host=os.getenv("LANGFUSE_HOST", "http://localhost:3000"),
+        )
+        observe = langfuse_observe
+        TRACING_ENABLED = True
+    else:
+        _tracing_logger.warning(
+            "LANGFUSE_PUBLIC_KEY and/or LANGFUSE_SECRET_KEY not set — tracing disabled"
+        )
+        langfuse = None
+        TRACING_ENABLED = False
+        observe = _noop_observe
 
 except ImportError:
-    # Langfuse not installed - provide no-op fallback
     langfuse = None
     TRACING_ENABLED = False
-
-    def observe(name=None, **kwargs):
-        """No-op decorator when langfuse is not installed."""
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
-            return wrapper
-        return decorator
+    observe = _noop_observe
 
 def is_tracing_enabled() -> bool:
     """Check if Langfuse tracing is active."""

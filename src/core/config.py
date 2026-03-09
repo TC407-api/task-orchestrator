@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Credentials paths
     oauth_credentials_path: Path = Path.home() / ".claude" / "oauth-credentials.json"
-    oauth_token_path: Path = Path.home() / ".claude" / "oauth-token.pickle"
+    oauth_token_path: Path = Path.home() / ".claude" / "oauth-token.json"
     service_account_path: Path = Path.home() / ".claude" / "vertex-ai-key.json"
 
     # API Scopes

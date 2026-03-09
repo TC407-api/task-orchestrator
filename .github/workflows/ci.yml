@@ -5,6 +5,8 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6AM UTC
 
 env:
   PYTHON_VERSION: "3.11"
@@ -131,13 +133,42 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install bandit safety
+          pip install bandit pip-audit
+          pip install -r requirements.txt
 
       - name: Run Bandit security linter
         run: bandit -r src/ -ll -ii -x tests/
 
-      - name: Check dependencies for vulnerabilities
-        run: pip install -r requirements.txt && safety check
+      - name: Run pip-audit for CVE scanning
+        run: pip-audit
+
+      - name: Detect hardcoded credentials
+        run: |
+          echo "Scanning for hardcoded keys..."
+          if grep -rn "sk-lf\|pk-lf\|AIzaSy\|sk-ant-\|sk-or-v1" src/ lib/ --include="*.py" | grep -v "\.pyc"; then
+            echo "::error::Hardcoded credentials detected in source!"
+            exit 1
+          fi
+          echo "No hardcoded credentials found."
+
+  security-scheduled:
+    name: Weekly Security Scan
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install and audit
+        run: |
+          python -m pip install --upgrade pip pip-audit bandit
+          pip install -r requirements.txt
+          pip-audit
+          bandit -r src/ -ll -ii -x tests/
 
   build:
     name: Build Check

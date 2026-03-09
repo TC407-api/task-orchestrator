@@ -12,7 +12,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from .auth import get_current_user, TokenData
+from .auth import get_current_user, require_scopes, TokenData
 from ..agents.coordinator import (
     CoordinatorAgent,
     Task,
@@ -182,7 +182,7 @@ async def health_check(request: Request):
     }
 
 
-@app.get("/tasks", response_model=list[TaskResponse])
+@app.get("/tasks", response_model=list[TaskResponse], dependencies=[Depends(require_scopes("read"))])
 @limiter.limit("100/minute")
 async def list_tasks(
     request: Request,
@@ -222,7 +222,7 @@ async def list_tasks(
     return [_task_to_response(t) for t in tasks]
 
 
-@app.post("/tasks", response_model=TaskResponse, status_code=201)
+@app.post("/tasks", response_model=TaskResponse, status_code=201, dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("30/minute")
 async def create_task(
     request: Request,
@@ -252,7 +252,7 @@ async def create_task(
     return _task_to_response(new_task)
 
 
-@app.get("/tasks/{task_id}", response_model=TaskResponse)
+@app.get("/tasks/{task_id}", response_model=TaskResponse, dependencies=[Depends(require_scopes("read"))])
 @limiter.limit("100/minute")
 async def get_task(
     request: Request,
@@ -270,7 +270,7 @@ async def get_task(
     return _task_to_response(task)
 
 
-@app.patch("/tasks/{task_id}", response_model=TaskResponse)
+@app.patch("/tasks/{task_id}", response_model=TaskResponse, dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("30/minute")
 async def update_task(
     request: Request,
@@ -308,7 +308,7 @@ async def update_task(
     return _task_to_response(task)
 
 
-@app.delete("/tasks/{task_id}", status_code=204)
+@app.delete("/tasks/{task_id}", status_code=204, dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("30/minute")
 async def delete_task(
     request: Request,
@@ -325,7 +325,7 @@ async def delete_task(
     del coordinator.tasks[task_id]
 
 
-@app.post("/tasks/{task_id}/complete", response_model=TaskResponse)
+@app.post("/tasks/{task_id}/complete", response_model=TaskResponse, dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("30/minute")
 async def complete_task(
     request: Request,
@@ -344,7 +344,7 @@ async def complete_task(
         raise HTTPException(404, str(e))
 
 
-@app.post("/tasks/{task_id}/schedule", response_model=ScheduleResponse)
+@app.post("/tasks/{task_id}/schedule", response_model=ScheduleResponse, dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("30/minute")
 async def schedule_task(
     request: Request,
@@ -378,7 +378,7 @@ async def schedule_task(
         raise HTTPException(404, str(e))
 
 
-@app.post("/sync/email", response_model=SyncResponse)
+@app.post("/sync/email", response_model=SyncResponse, dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("10/minute")
 async def sync_from_email(
     request: Request,
@@ -398,7 +398,7 @@ async def sync_from_email(
         raise HTTPException(503, str(e))
 
 
-@app.get("/summary/daily")
+@app.get("/summary/daily", dependencies=[Depends(require_scopes("read"))])
 @limiter.limit("30/minute")
 async def get_daily_summary(
     request: Request,
@@ -411,7 +411,7 @@ async def get_daily_summary(
     return await coordinator.get_daily_summary()
 
 
-@app.get("/tasks/prioritized", response_model=list[TaskResponse])
+@app.get("/tasks/prioritized", response_model=list[TaskResponse], dependencies=[Depends(require_scopes("read"))])
 @limiter.limit("60/minute")
 async def get_prioritized_tasks(
     request: Request,
@@ -425,7 +425,7 @@ async def get_prioritized_tasks(
     return [_task_to_response(t) for t in tasks]
 
 
-@app.get("/tasks/overdue", response_model=list[TaskResponse])
+@app.get("/tasks/overdue", response_model=list[TaskResponse], dependencies=[Depends(require_scopes("read"))])
 @limiter.limit("60/minute")
 async def get_overdue_tasks(
     request: Request,
@@ -439,7 +439,7 @@ async def get_overdue_tasks(
     return [_task_to_response(t) for t in tasks]
 
 
-@app.post("/schedule/auto")
+@app.post("/schedule/auto", dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("10/minute")
 async def auto_schedule_tasks(
     request: Request,
@@ -465,7 +465,7 @@ async def auto_schedule_tasks(
     }
 
 
-@app.post("/focus/block")
+@app.post("/focus/block", dependencies=[Depends(require_scopes("write"))])
 @limiter.limit("10/minute")
 async def block_focus_time(
     request: Request,

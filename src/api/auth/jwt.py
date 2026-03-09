@@ -187,6 +187,7 @@ class JWTKeyManager:
         """
         self.storage_path = Path(key_storage_path or JWT_RS256_KEY_PATH)
         self.storage_path.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(self.storage_path), 0o700)
 
         self._current_key_id: Optional[str] = None
         self._keys: dict[str, dict] = {}  # kid -> {private, public, created, expires}
@@ -213,7 +214,7 @@ class JWTKeyManager:
                 f,
                 indent=2,
             )
-        os.chmod(keys_file, 0o600)
+        os.chmod(str(keys_file), 0o600)
 
     def generate_keypair(self) -> Tuple[str, str]:
         """

@@ -1,16 +1,35 @@
 """FastAPI REST server for local Graphiti-compatible API."""
 import logging
 import os
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .storage import LocalGraphitiStorage
 
 logger = logging.getLogger(__name__)
+
+# Authentication token — set via env or auto-generated
+_graphiti_token = os.getenv("GRAPHITI_TOKEN")
+if not _graphiti_token:
+    _graphiti_token = secrets.token_urlsafe(32)
+    logger.warning("GRAPHITI_TOKEN not set — auto-generated token (printed once):")
+    print(f"\n  GRAPHITI_TOKEN={_graphiti_token}\n")
+GRAPHITI_TOKEN: str = _graphiti_token
+
+
+async def require_token(request: Request) -> None:
+    """Dependency that validates Bearer token on protected routes."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    token = auth[len("Bearer "):]
+    if not secrets.compare_digest(token, GRAPHITI_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 # Configuration
 DB_PATH = Path(os.getenv("GRAPHITI_DB_PATH", str(Path.home() / ".claude" / "graphiti_local.db")))
@@ -109,7 +128,7 @@ async def health_check() -> Dict[str, str]:
     return {"status": "healthy", "service": "graphiti-local"}
 
 
-@app.post("/episodes", response_model=EpisodeResponse)
+@app.post("/episodes", response_model=EpisodeResponse, dependencies=[Depends(require_token)])
 async def add_episode(request: EpisodeRequest) -> Dict[str, Any]:
     """
     Add an episode and extract entities/facts.
@@ -130,7 +149,7 @@ async def add_episode(request: EpisodeRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/nodes/search")
+@app.get("/nodes/search", dependencies=[Depends(require_token)])
 async def search_nodes(
     query: str = Query(..., description="Search query"),
     group_ids: Optional[str] = Query(None, description="Comma-separated group IDs"),
@@ -161,7 +180,7 @@ async def search_nodes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/facts/search")
+@app.get("/facts/search", dependencies=[Depends(require_token)])
 async def search_facts(
     query: str = Query(..., description="Search query"),
     group_ids: Optional[str] = Query(None, description="Comma-separated group IDs"),
@@ -192,13 +211,13 @@ async def search_facts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/stats", response_model=StatsResponse)
+@app.get("/stats", response_model=StatsResponse, dependencies=[Depends(require_token)])
 async def get_stats() -> Dict[str, int]:
     """Get storage statistics."""
     return storage.get_stats()
 
 
-@app.post("/sync", response_model=SyncResponse)
+@app.post("/sync", response_model=SyncResponse, dependencies=[Depends(require_token)])
 async def trigger_sync(request: SyncRequest = SyncRequest()) -> Dict[str, Any]:
     """
     Trigger sync to MCP Graphiti backup.
@@ -216,7 +235,7 @@ async def trigger_sync(request: SyncRequest = SyncRequest()) -> Dict[str, Any]:
         return {"synced": 0, "failed": 0, "errors": [str(e)]}
 
 
-@app.get("/episodes/unsynced")
+@app.get("/episodes/unsynced", dependencies=[Depends(require_token)])
 async def get_unsynced_episodes(
     limit: int = Query(100, description="Maximum episodes to return"),
 ) -> List[Dict[str, Any]]:
@@ -224,7 +243,7 @@ async def get_unsynced_episodes(
     return storage.get_unsynced_episodes(limit=limit)
 
 
-def start_server(host: str = "127.0.0.1", port: int = 8000):
+def start_server(host: str = os.getenv("GRAPHITI_BIND_HOST", "127.0.0.1"), port: int = 8000):
     """Start the server using uvicorn."""
     import uvicorn
     uvicorn.run(app, host=host, port=port)

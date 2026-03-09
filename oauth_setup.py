@@ -1,5 +1,6 @@
 """OAuth setup script - run this to authorize Gmail/Calendar access."""
-import pickle
+import json
+import os
 from pathlib import Path
 
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -13,9 +14,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# Paths
+# Paths — JSON format matching src/core/auth.py
 CREDENTIALS_PATH = Path.home() / ".claude" / "oauth-credentials.json"
-TOKEN_PATH = Path.home() / ".claude" / "oauth-token.pickle"
+TOKEN_PATH = Path.home() / ".claude" / "oauth-token.json"
 
 
 def main():
@@ -46,10 +47,23 @@ def main():
         # Run the OAuth flow - this opens a browser
         creds = flow.run_local_server(port=0)
 
-        # Save the token
-        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(TOKEN_PATH, "wb") as token:
-            pickle.dump(creds, token)
+        # Save the token as JSON (matching src/core/auth.py format)
+        token_dir = TOKEN_PATH.parent
+        token_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(token_dir), 0o700)
+
+        token_data = {
+            "token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+            "scopes": list(creds.scopes) if creds.scopes else SCOPES,
+        }
+
+        with open(TOKEN_PATH, "w") as token:
+            json.dump(token_data, token)
+        os.chmod(str(TOKEN_PATH), 0o600)
 
         print()
         print("=" * 60)

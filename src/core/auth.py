@@ -23,7 +23,7 @@ def get_oauth_credentials(
     Args:
         scopes: List of OAuth scopes required
         credentials_path: Path to OAuth client credentials JSON
-        token_path: Path to store/load token pickle
+        token_path: Path to store/load token JSON
 
     Returns:
         Valid Credentials object
@@ -56,7 +56,9 @@ def get_oauth_credentials(
             creds = flow.run_local_server(port=0)
 
         # Save token for next run (JSON format for security)
-        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_dir = token_path.parent
+        token_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(token_dir), 0o700)
         with open(token_path, "w") as token:
             token_data = {
                 "token": creds.token,
@@ -67,7 +69,7 @@ def get_oauth_credentials(
                 "scopes": list(creds.scopes) if creds.scopes else scopes,
             }
             json.dump(token_data, token)
-        os.chmod(token_path, 0o600)
+        os.chmod(str(token_path), 0o600)
 
     return creds
 
