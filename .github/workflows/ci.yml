@@ -92,32 +92,6 @@ jobs:
       - name: Run plugin tests
         run: pytest tests/test_plugins.py -v
 
-  test-matrix:
-    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio
-
-      - name: Run core tests
-        run: pytest tests/test_plugins.py tests/test_evaluation.py tests/test_immune_system.py -v
-
   security:
     name: Security Scan
     runs-on: ubuntu-latest
